@@ -41,8 +41,8 @@ Pico 2 3V3  ----------------------> ADS1220 AVDD
 Pico 2 GND  ----------------------> ADS1220 DGND
 Pico 2 GND  ----------------------> ADS1220 AVSS / AGND
 Pico 2 GP18 (SPI0 SCK) -----------> ADS1220 SCLK
-Pico 2 GP19 (SPI0 MOSI/TX) -------> ADS1220 DIN
-Pico 2 GP16 (SPI0 MISO/RX) <------- ADS1220 DOUT/DRDY
+Pico 2 GP19 (SPI0 MOSI/TX) -------> ADS1220 MOSI
+Pico 2 GP16 (SPI0 MISO/RX) <------- ADS1220 MISO
 Pico 2 GP6  ----------------------> ADS1220 CS (aktiv LOW)
 Pico 2 GP7  <---------------------- ADS1220 DRDY (aktiv LOW)
 ADS1220 CLK ----------------------> nicht verbinden (interner Oszillator)

@@ -14,8 +14,7 @@ class Encoder {
   EncoderEvents update(uint32_t nowMs);
 
  private:
-  uint8_t previousAb_ = 0;
-  int8_t quarterSteps_ = 0;
+  int32_t processedPosition_ = 0;
   bool rawButton_ = false;
   bool stableButton_ = false;
   bool longReported_ = false;

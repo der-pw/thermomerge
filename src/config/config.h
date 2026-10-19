@@ -63,6 +63,7 @@ constexpr float DEFAULT_KP = 2.0f;
 constexpr float DEFAULT_KI = 0.10f;
 constexpr float DEFAULT_KD = 5.0f;
 constexpr float ENCODER_STEP_C = 1.0f;
+constexpr uint8_t ENCODER_COUNTS_PER_DETENT = 4;
 constexpr uint32_t BUTTON_DEBOUNCE_MS = 30;
 constexpr uint32_t BUTTON_LONG_PRESS_MS = 1000;
 

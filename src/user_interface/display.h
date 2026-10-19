@@ -23,11 +23,13 @@ class Display {
   uint8_t page_ = 0;
   uint8_t initPhase_ = 0;
   bool initialized_ = false;
+  bool bootScreenActive_ = false;
+  uint32_t bootScreenUntilMs_ = 0;
   void writeLine(uint8_t row, const char *text);
   void expanderWrite(uint8_t value);
   void writeNibble(uint8_t nibble, bool data);
   void send(uint8_t value, bool data);
   void command(uint8_t value);
   void writeCharacter(char value);
-  bool initializeStep();
+  bool initializeStep(uint32_t nowMs);
 };

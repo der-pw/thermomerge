@@ -19,15 +19,15 @@ Die Firmware startet grundsätzlich in `MODE=OFF`. Ein gespeicherter Sollwert ak
 | ADS1220 CS | GP6 | Wärmestrom-ADC, aktiv LOW |
 | ADS1220 DRDY | GP7 | dedizierter Daten-bereit-Ausgang, aktiv LOW |
 | SSR-Ausgang | GP22 | aktiv HIGH; externe Pulldown-Beschaltung vorsehen |
-| I²C SDA | GP4 | 1602-LCD mit PCF8574 |
-| I²C SCL | GP5 | 1602-LCD mit PCF8574 |
+| I²C1 SDA | GP2 | 1602-LCD mit PCF8574 (`Wire1`) |
+| I²C1 SCL | GP3 | 1602-LCD mit PCF8574 (`Wire1`) |
 | Encoder A | GP10 | interner Pull-up |
 | Encoder B | GP11 | interner Pull-up |
 | Encoder-Taster | GP12 | aktiv LOW, interner Pull-up |
 | Wärmestrom-ADC | ADS1220 an GP6/7, SPI0 | fest integrierter ADS1220-Treiber |
 | Status-LED | `LED_BUILTIN` | OK langsam, DEGRADED mittel, FAULT schnell |
 
-Alle Pins, Zeitraster, Grenzen und Kalibrierwerte stehen zentral in [`src/config/config.h`](src/config/config.h). Die noch nicht hardwareseitig festgelegten Pins GP22, GP4/5 und GP10/11/12 sind bewusst leicht änderbare Defaults.
+Alle Pins, Zeitraster, Grenzen und Kalibrierwerte stehen zentral in [`src/config/config.h`](src/config/config.h). Die noch nicht hardwareseitig festgelegten Pins GP22, GP2/3 und GP10/11/12 sind bewusst leicht änderbare Defaults.
 
 Die drei MAX31855 und der ADS1220 teilen MISO und SCK; GP19/MOSI wird nur vom ADS1220 benötigt. Jeder Wandler besitzt eine eigene CS-Leitung. Das LCD verwendet standardmäßig die I²C-Adresse `0x27`. Der integrierte, nichtblockierend initialisierte PCF8574/HD44780-Treiber benötigt keine zusätzliche LCD-Bibliothek.
 
@@ -122,6 +122,8 @@ Autotune wird vom Rechner gestartet. Ein Relay-Verfahren erzeugt kontrollierte S
 
 ## Lokale Bedienung
 
+- Nach der LCD-Initialisierung zeigt das Display vier Sekunden zentriert
+  `CONE` und `HEATER`; anschließend erscheint das Startmenü.
 - Nach dem Start erscheint zunächst ein Auswahlmenü mit `SETPOINT` und
   `HEIZER KAL.`. Drehen wählt, kurzer Tastendruck öffnet den Menüpunkt.
 - `HEIZER KAL.` besitzt einen zusätzlichen Startschritt: Zuerst wird die

@@ -15,9 +15,9 @@ Display::Display() = default;
 
 void Display::begin() {
   if (!config::LCD_ENABLED) return;
-  Wire.setSDA(config::I2C_SDA_GPIO);
-  Wire.setSCL(config::I2C_SCL_GPIO);
-  Wire.begin();
+  Wire1.setSDA(config::I2C_SDA_GPIO);
+  Wire1.setSCL(config::I2C_SCL_GPIO);
+  Wire1.begin();
 }
 
 void Display::nextPage() { page_ = (page_ + 1) % 2; }
@@ -31,9 +31,9 @@ void Display::writeLine(uint8_t row, const char *text) {
 }
 
 void Display::expanderWrite(uint8_t value) {
-  Wire.beginTransmission(config::LCD_ADDRESS);
-  Wire.write(value | LCD_BACKLIGHT);
-  Wire.endTransmission();
+  Wire1.beginTransmission(config::LCD_ADDRESS);
+  Wire1.write(value | LCD_BACKLIGHT);
+  Wire1.endTransmission();
 }
 
 void Display::writeNibble(uint8_t nibble, bool data) {
@@ -50,7 +50,7 @@ void Display::send(uint8_t value, bool data) {
 void Display::command(uint8_t value) { send(value, false); }
 void Display::writeCharacter(char value) { send(static_cast<uint8_t>(value), true); }
 
-bool Display::initializeStep() {
+bool Display::initializeStep(uint32_t nowMs) {
   // Calls are separated by the 500 ms display task, exceeding all HD44780
   // power-up timings without blocking the control loop.
   if (initPhase_ < 3) {
@@ -68,6 +68,8 @@ bool Display::initializeStep() {
   command(0x06);  // increment, no shift
   command(0x01);  // clear; next write is one scheduler period later
   initialized_ = true;
+  bootScreenActive_ = true;
+  bootScreenUntilMs_ = nowMs + config::LCD_BOOT_SCREEN_MS;
   return false;
 }
 
@@ -78,8 +80,16 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                      float calibrationTargetC, float heatFluxKwM2) {
   if (!config::LCD_ENABLED) return;
   if (!initialized_) {
-    initializeStep();
+    initializeStep(nowMs);
     return;
+  }
+  if (bootScreenActive_) {
+    if (static_cast<int32_t>(nowMs - bootScreenUntilMs_) < 0) {
+      writeLine(0, "      CONE      ");
+      writeLine(1, "     HEATER     ");
+      return;
+    }
+    bootScreenActive_ = false;
   }
   char line1[24], line2[24];
   if (state.status == SystemStatus::FAULT) {

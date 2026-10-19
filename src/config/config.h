@@ -23,10 +23,11 @@ constexpr uint32_t ADS1220_RETRY_INTERVAL_MS = 1000;
 // Hardware defaults chosen from currently unused pins. Change them here only.
 constexpr uint8_t SSR_GPIO = 22;
 constexpr bool SSR_ACTIVE_HIGH = true;
-constexpr uint8_t I2C_SDA_GPIO = 4;
-constexpr uint8_t I2C_SCL_GPIO = 5;
+constexpr uint8_t I2C_SDA_GPIO = 2;
+constexpr uint8_t I2C_SCL_GPIO = 3;
 constexpr uint8_t LCD_ADDRESS = 0x27;
 constexpr bool LCD_ENABLED = true;
+constexpr uint32_t LCD_BOOT_SCREEN_MS = 4000;
 constexpr uint8_t ENCODER_A_GPIO = 10;
 constexpr uint8_t ENCODER_B_GPIO = 11;
 constexpr uint8_t ENCODER_BUTTON_GPIO = 12;

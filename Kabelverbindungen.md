@@ -75,8 +75,8 @@ Der 100-nF-Kondensator liegt direkt zwischen AIN0 und AIN1. Die beiden 10-MΩ-Wi
 ```text
 Pico 2 3V3  ----------------------> LCD-PCF8574 VCC (nur 3,3-V-taugliches Backpack)
 Pico 2 GND  ----------------------> LCD-PCF8574 GND
-Pico 2 GP4 (I²C SDA) -------------> LCD-PCF8574 SDA
-Pico 2 GP5 (I²C SCL) -------------> LCD-PCF8574 SCL
+Pico 2 GP2 (I²C1 SDA) ------------> LCD-PCF8574 SDA
+Pico 2 GP3 (I²C1 SCL) ------------> LCD-PCF8574 SCL
 ```
 
 Die Firmware erwartet standardmäßig die I²C-Adresse `0x27`. Viele Backpacks arbeiten mit 5 V und ziehen SDA/SCL über Widerstände auf 5 V. Solche Backpacks nicht direkt an den Pico anschließen: ein 3,3-V-taugliches Backpack oder ein geeigneter bidirektionaler I²C-Pegelwandler ist erforderlich. Kontrast und Hintergrundbeleuchtung werden am LCD-Backpack eingestellt.

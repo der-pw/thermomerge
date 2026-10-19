@@ -10,10 +10,10 @@ Die Firmware startet grundsätzlich in `MODE=OFF`. Ein gespeicherter Sollwert ak
 
 | Funktion | Pico-2-GPIO | Hinweise |
 | --- | ---: | --- |
-| SPI0 RX / MISO | GP16 | DO aller MAX31855 und ADS1220 DOUT/DRDY; 3,3-V-kompatibel |
+| SPI0 RX / MISO | GP16 | DO aller MAX31855 und MISO des ADS1220; 3,3-V-kompatibel |
 | MAX31855 T1 CS | GP17 | bestehende Belegung |
 | SPI0 SCK | GP18 | CLK aller MAX31855 |
-| SPI0 TX / MOSI | GP19 | ADS1220 DIN |
+| SPI0 TX / MOSI | GP19 | MOSI des ADS1220 |
 | MAX31855 T2 CS | GP20 | bestehende Belegung |
 | MAX31855 T3 CS | GP21 | bestehende Belegung |
 | ADS1220 CS | GP6 | Wärmestrom-ADC, aktiv LOW |
@@ -30,130 +30,6 @@ Die Firmware startet grundsätzlich in `MODE=OFF`. Ein gespeicherter Sollwert ak
 Alle Pins, Zeitraster, Grenzen und Kalibrierwerte stehen zentral in [`src/config/config.h`](src/config/config.h). Die noch nicht hardwareseitig festgelegten Pins GP22, GP4/5 und GP10/11/12 sind bewusst leicht änderbare Defaults.
 
 Die drei MAX31855 und der ADS1220 teilen MISO und SCK; GP19/MOSI wird nur vom ADS1220 benötigt. Jeder Wandler besitzt eine eigene CS-Leitung. Das LCD verwendet standardmäßig die I²C-Adresse `0x27`. Der integrierte, nichtblockierend initialisierte PCF8574/HD44780-Treiber benötigt keine zusätzliche LCD-Bibliothek.
-
-## Textbasierte Anschlusspläne
-
-Die folgenden Pläne zeigen die aktuell in `config/config.h` hinterlegte Belegung. Alle Signalspannungen am Pico müssen 3,3-V-kompatibel sein; die GPIOs des Pico 2 sind nicht 5-V-tolerant. Für alle Logikgeräte müssen Pico und Gerät eine gemeinsame Masse (`GND`) haben.
-
-### Drei MAX31855 für Typ-K-Thermoelemente
-
-```text
-Pico 2                         MAX31855 #1       MAX31855 #2       MAX31855 #3
--------------------------------------------------------------------------------
-3V3  ------------------------> VIN/VCC          VIN/VCC          VIN/VCC
-GND  ------------------------> GND              GND              GND
-GP16 (SPI0 RX / MISO) --------> DO              DO               DO
-GP18 (SPI0 SCK) --------------> CLK             CLK              CLK
-GP17 ------------------------> CS              (nicht verbinden) (nicht verbinden)
-GP20 ------------------------> (nicht verbinden) CS             (nicht verbinden)
-GP21 ------------------------> (nicht verbinden) (nicht verbinden) CS
-
-Typ-K-Fühler 1 ---------------> T+ / T- an MAX31855 #1
-Typ-K-Fühler 2 --------------------------------> T+ / T- an MAX31855 #2
-Typ-K-Fühler 3 ------------------------------------------------> T+ / T- an MAX31855 #3
-```
-
-`DO` und `CLK` werden als gemeinsamer SPI-Bus parallel zu allen drei Modulen geführt. `CS` bleibt pro Modul getrennt. GP19/MOSI ist auf dem gemeinsamen Bus vorhanden, wird von den MAX31855 aber nicht ausgewertet. Die Polarität des Typ-K-Thermoelements (`T+`/`T-`) ist einzuhalten. Die konkrete Versorgung der Breakout-Boards ist anhand deren Datenblatt zu prüfen; für die Logik ist eine 3,3-V-kompatible Konfiguration erforderlich.
-
-### 1602-LCD mit I²C-PCF8574-Backpack
-
-```text
-Pico 2                         LCD-PCF8574
-------------------------------------------
-3V3  ------------------------> VCC
-GND  ------------------------> GND
-GP4  (I²C SDA) --------------> SDA
-GP5  (I²C SCL) --------------> SCL
-```
-
-Die Firmware erwartet standardmäßig die I²C-Adresse `0x27`. Viele LCD-Backpacks sind für 5 V ausgelegt und besitzen 5-V-Pull-ups an `SDA`/`SCL`; solche Module dürfen nicht direkt an den Pico angeschlossen werden. Dann ist entweder ein 3,3-V-taugliches Backpack oder ein geeigneter bidirektionaler I²C-Pegelwandler erforderlich. Die LCD-Beleuchtung und der Kontrast werden vom Backpack versorgt bzw. eingestellt.
-
-### Drehencoder mit Taster
-
-```text
-Pico 2                         Drehencoder-Modul
-------------------------------------------------
-3V3  ------------------------> VCC (falls vorhanden)
-GND  ------------------------> GND / COM
-GP10 (Encoder A) ------------> A / CLK
-GP11 (Encoder B) ------------> B / DT
-GP12 (Taster) ---------------> SW
-GND  ------------------------> Taster-Gegenkontakt (falls separat)
-```
-
-Die Firmware aktiviert interne Pull-ups. Deshalb werden `A`, `B` und der Taster jeweils gegen `GND` geschaltet; externe Pull-up-Widerstände sind normalerweise nicht erforderlich. Die Drehrichtung kann bei abweichender mechanischer Belegung durch Vertauschen von `A` und `B` oder in der Software angepasst werden.
-
-### SSR-Steuereingang und Heizer
-
-```text
-Pico 2                         DC-Steuereingang eines SSR-Moduls
------------------------------------------------------------------
-GP22 (SSR-Ausgang, aktiv HIGH) ------------------------------> IN+
-GND  --------------------------------------------------------> IN-
-
-Netz-/Lastseite des SSR: ausschließlich nach SSR-Datenblatt,
-mit Sicherung, Schutzmaßnahmen, unabhängiger Abschaltung und
-geeigneter Verdrahtung durch eine qualifizierte Elektrofachkraft.
-```
-
-`GP22` ist nur ein Steuersignal. Bei einem nackten SSR oder einem Modul mit höherem Eingangsstrom ist eine passende Transistor-/Treiberstufe erforderlich; der GPIO darf nicht direkt mit der Netz- oder Heizlast verbunden werden. Die Software setzt den Ausgang beim Start und in allen Sicherheitszuständen auf AUS. Das ersetzt keine Hardware-Sicherheitskette.
-
-### Status-LED und USB
-
-```text
-Pico 2                         Funktion
------------------------------------------
-LED_BUILTIN -----------------> interne Status-LED (keine externe Leitung)
-USB --------------------------> USB-CDC-Serial für Protokoll/Telemetrie
-```
-
-### Wärmestromsensor / Schmidt-Boelter
-
-```text
-MEDTHERM Schmidt-Boelter -> ADS1220 (differentiell AIN0 - AIN1)
-ADS1220 -> gemeinsamer SPI0-Bus des Pico 2
-```
-
-#### ADS1220 <-> Pico 2
-
-| ADS1220 | Pico 2 | Hinweis |
-| --- | --- | --- |
-| DVDD | 3.3 V | digitale Versorgung, niemals 5 V am Pico-SPI |
-| AVDD | 3.3 V | analoge Versorgung |
-| DGND | GND | gemeinsame Masse |
-| AVSS / AGND | GND | analoge Masse |
-| SCLK | GP18 (SPI0 SCK) | gemeinsamer SPI-Takt |
-| DIN | GP19 (SPI0 MOSI) | Pico -> ADS1220 |
-| DOUT/DRDY | GP16 (SPI0 MISO) | ADS1220 -> Pico, mit MAX31855-DO geteilt |
-| CS | GP6 | separat, aktiv LOW |
-| DRDY | GP7 | separat, aktiv LOW; ermöglicht nichtblockierendes Warten |
-| CLK | unbenutzt | interner ADS1220-Oszillator |
-
-Der ADS1220 arbeitet standardmäßig mit AIN0 minus AIN1, interner 2,048-V-Referenz, PGA-Gain 32, normalem Single-Shot-Modus bei 20 SPS und simultaner 50-/60-Hz-Unterdrückung. Für Gain 64 ist ausschließlich `ADS1220_PGA_GAIN` in `src/config/config.h` anzupassen. Die SPI-Konfiguration ist Mode 1 bei 1 MHz. Der ADC ist keine Sicherheitsvoraussetzung: ein ADC-Fehler stoppt die Wärmestromtelemetrie, beeinflusst aber weder die Thermoelement-Plausibilisierung noch die Heizerabschaltung.
-
-#### Analoge Eingangsbeschaltung der MEDTHERM-Sonde
-
-```text
-                         3.3 V
-                           |
-                         10 MOhm
-                           |
-MEDTHERM GTW+ -------------+---- 1 kOhm ----+---- AIN0 (ADS1220)
-                                             |
-                                           100 nF
-                                             |
-MEDTHERM GTW- -------------+---- 1 kOhm ----+---- AIN1 (ADS1220)
-                           |
-                         10 MOhm
-                           |
-                          GND
-
-ADS1220: AVDD/DVDD -> 3.3 V, AGND/DGND -> GND
-         SCLK -> GP18, DIN -> GP19, DOUT/DRDY -> GP16,
-         CS -> GP6, DRDY -> GP7, CLK unbeschaltet
-```
-
-Die MEDTHERM-Sonde wird differentiell gemessen; GTW+ und GTW- werden nicht direkt auf Masse bezogen. Die beiden 10-MOhm-Widerstände sind Bias-Widerstände für die potentialfreie Thermopile. Sie erzeugen einen definierten Common-Mode-Arbeitspunkt von ungefähr AVDD/2. Die 1-kOhm-Serienwiderstände und der 100-nF-Kondensator **direkt zwischen AIN0 und AIN1** bilden den differentiellen RC-Tiefpass. Mit `R_eff = 1 kOhm + 1 kOhm = 2 kOhm` gilt näherungsweise `fc = 1 / (2*pi*2kOhm*100nF) = 796 Hz`. Der Filter begrenzt primär HF-Störungen; weitere Glättung kann digital erfolgen. Der 100-nF-Kondensator kann ein X7R-Keramikkondensator sein. Optional dürfen AIN0 und AIN1 jeweils über 10 nF nach AGND geführt werden, falls eine zusätzliche Common-Mode-Filterung erforderlich ist.
 
 ## Softwarearchitektur
 

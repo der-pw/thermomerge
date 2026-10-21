@@ -85,9 +85,19 @@ und der Nutzer den Upload ausdrücklich beauftragen.
 - Lokale Anzeigeergänzungen dürfen Temperatur, Sollwert, Ausgang, Modus,
   Profilfortschritt und Fehlerstatus darstellen, ohne die serielle
   Steuerungsarchitektur zu umgehen.
-- Ein lokaler Sollwertdialog ist zulässig: Longpress öffnet ihn, Änderungen
-  bleiben bis zur Anzeigeauswahl `OK`/`ABBR.` vorläufig. PID-/Autotune-Befehle
-  und PID-Parameter bleiben davon getrennt und seriell.
+- Der lokale Bedienfluss startet nach dem Splash auf der normalen
+  Statusseite. Außerhalb von `PROFILE` und `AUTOTUNE` öffnet Longpress das
+  lokale Menü mit `SET SP`, `TC VIEW`, `HEATFLUX` und `HEIZER KAL.`. Drehen
+  wählt, kurzer Tastendruck öffnet den markierten Eintrag. In `HEATFLUX` dreht
+  der Encoder zwischen Rohspannung `RAW` in mV und kalibriertem `W/m2` um.
+- Der Sollwertdialog ist nur über `SET SP` erreichbar. Änderungen bleiben
+  bis zur Anzeigeauswahl `OK`/`ABBR.` vorläufig. PID-/Autotune-Befehle und
+  PID-Parameter bleiben davon getrennt und seriell.
+- Jede Änderung an Display-, Encoder- oder Menüverhalten muss im selben
+  Arbeitsgang im README-Abschnitt „Lokale Bedienung“ dokumentiert werden.
+  Dazu gehören Menüeinträge, Navigation, Ein-/Ausstieg sowie angezeigte
+  Werte und Zustände; Display-Mockups sind bei betroffenen Anzeigen ebenfalls
+  nachzuführen.
 - Eine serielle Verbindung sperrt den Encoder nicht implizit. Der PC muss den
   UI-Besitz ausdrücklich mit `UI,CONNECT` übernehmen; danach sind sämtliche
   Encoder-Aktionen blockiert. `UI,DISCONNECT` gibt die lokale Bedienung wieder

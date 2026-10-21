@@ -16,6 +16,7 @@ class HeatFluxSensor {
   bool valid() const;
   bool calibrationValid() const;
   bool fault() const;
+  bool responsive() const;
   HeatFluxStatus status() const;
   float rawValue() const;
   float engineeringValue() const { return engineeringValueKwM2_; }

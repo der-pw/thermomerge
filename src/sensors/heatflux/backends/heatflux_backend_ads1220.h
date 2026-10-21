@@ -10,6 +10,7 @@ class HeatFluxBackendAds1220 final {
   bool enabled() const;
   bool valid() const;
   bool fault() const;
+  bool responsive() const { return responded_; }
   float rawValue() const;
 
   int32_t rawCode() const { return rawCode_; }
@@ -24,6 +25,7 @@ class HeatFluxBackendAds1220 final {
   int32_t rawCode_ = 0;
   float voltageV_ = NAN;
   bool sampleValid_ = false;
+  bool responded_ = false;
 
   ADS1220::Settings settings() const;
   void enterFault(uint32_t nowMs);

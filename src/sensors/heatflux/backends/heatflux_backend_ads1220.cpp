@@ -11,6 +11,7 @@ HeatFluxBackendAds1220::HeatFluxBackendAds1220()
 void HeatFluxBackendAds1220::begin() {
   adc_.begin();
   sampleValid_ = false;
+  responded_ = false;
   voltageV_ = NAN;
   adc_.reset();
   deadlineMs_ = millis() + 1;
@@ -28,6 +29,7 @@ void HeatFluxBackendAds1220::update(uint32_t nowMs) {
         enterFault(nowMs);
         return;
       }
+      responded_ = true;
       state_ = State::IDLE;
       [[fallthrough]];
     case State::IDLE:

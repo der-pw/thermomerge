@@ -126,8 +126,9 @@ bool ADS1220::readRegisters(uint8_t address, uint8_t *values, uint8_t count) {
   if (!values || count == 0 || address + count > kRegisterCount) return false;
   beginTransaction();
   select();
-  spi_.transfer(static_cast<uint8_t>(kCommandReadRegister | address));
-  spi_.transfer(static_cast<uint8_t>(count - 1));
+  const uint8_t command = static_cast<uint8_t>(kCommandReadRegister |
+      (address << 2) | (count - 1));
+  spi_.transfer(command);
   for (uint8_t i = 0; i < count; ++i) values[i] = spi_.transfer(0x00);
   deselect();
   endTransaction();
@@ -138,8 +139,9 @@ bool ADS1220::writeRegisters(uint8_t address, const uint8_t *values, uint8_t cou
   if (!values || count == 0 || address + count > kRegisterCount) return false;
   beginTransaction();
   select();
-  spi_.transfer(static_cast<uint8_t>(kCommandWriteRegister | address));
-  spi_.transfer(static_cast<uint8_t>(count - 1));
+  const uint8_t command = static_cast<uint8_t>(kCommandWriteRegister |
+      (address << 2) | (count - 1));
+  spi_.transfer(command);
   for (uint8_t i = 0; i < count; ++i) spi_.transfer(values[i]);
   deselect();
   endTransaction();

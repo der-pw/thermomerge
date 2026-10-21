@@ -32,6 +32,7 @@ bool HeatFluxSensor::calibrationValid() const {
   return isfinite(calibrationFactor_) && calibrationFactor_ > 0.0f;
 }
 bool HeatFluxSensor::fault() const { return input_.fault(); }
+bool HeatFluxSensor::responsive() const { return input_.responsive(); }
 HeatFluxStatus HeatFluxSensor::status() const {
   if (!enabled()) return HeatFluxStatus::DISABLED;
   if (fault()) return HeatFluxStatus::FAULT;

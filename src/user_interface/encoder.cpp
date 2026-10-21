@@ -44,7 +44,8 @@ EncoderEvents Encoder::update(uint32_t nowMs) {
   const int32_t positionDelta = position - processedPosition_;
   const int32_t detents = positionDelta / config::ENCODER_COUNTS_PER_DETENT;
   if (detents != 0) {
-    events.detents = static_cast<int16_t>(detents);
+    // Invert direction here so every local UI action uses the same orientation.
+    events.detents = static_cast<int16_t>(-detents);
     processedPosition_ += detents * config::ENCODER_COUNTS_PER_DETENT;
   }
 

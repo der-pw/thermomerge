@@ -1,7 +1,9 @@
 #include "user_interface/display.h"
 
 #include <Wire.h>
+#include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "config/config.h"
 
@@ -9,6 +11,15 @@ namespace {
 constexpr uint8_t LCD_RS = 0x01;
 constexpr uint8_t LCD_ENABLE = 0x04;
 constexpr uint8_t LCD_BACKLIGHT = 0x08;
+
+void formatFloat(char *buffer, size_t size, float value, uint8_t width,
+                 uint8_t precision) {
+  if (!isfinite(value)) {
+    snprintf(buffer, size, "%*s", width, "--");
+    return;
+  }
+  dtostrf(value, width, precision, buffer);
+}
 }
 
 Display::Display() = default;
@@ -26,8 +37,28 @@ void Display::showMainPage() { page_ = 0; }
 void Display::writeLine(uint8_t row, const char *text) {
   char padded[17];
   snprintf(padded, sizeof(padded), "%-16.16s", text);
-  command(row == 0 ? 0x80 : 0xC0);
-  for (uint8_t i = 0; i < 16; ++i) writeCharacter(padded[i]);
+  uint8_t i = 0;
+  while (i < 16) {
+    while (i < 16 && rowCacheValid_[row] && padded[i] == rowCache_[row][i]) ++i;
+    if (i == 16) break;
+    command(static_cast<uint8_t>((row == 0 ? 0x80 : 0xC0) + i));
+    while (i < 16 && (!rowCacheValid_[row] || padded[i] != rowCache_[row][i])) {
+      writeCharacter(padded[i]);
+      rowCache_[row][i] = padded[i];
+      ++i;
+    }
+  }
+  rowCacheValid_[row] = true;
+}
+
+void Display::writeCenteredLine(uint8_t row, const char *text) {
+  char centered[17];
+  const size_t length = strnlen(text, 16);
+  const size_t left = (16 - length) / 2;
+  memset(centered, ' ', 16);
+  memcpy(centered + left, text, length);
+  centered[16] = '\0';
+  writeLine(row, centered);
 }
 
 void Display::expanderWrite(uint8_t value) {
@@ -51,7 +82,7 @@ void Display::command(uint8_t value) { send(value, false); }
 void Display::writeCharacter(char value) { send(static_cast<uint8_t>(value), true); }
 
 bool Display::initializeStep(uint32_t nowMs) {
-  // Calls are separated by the 500 ms display task, exceeding all HD44780
+  // Calls are separated by the display task, exceeding all HD44780
   // power-up timings without blocking the control loop.
   if (initPhase_ < 3) {
     writeNibble(0x03, false);
@@ -67,8 +98,11 @@ bool Display::initializeStep(uint32_t nowMs) {
   command(0x0C);  // display on, cursor off
   command(0x06);  // increment, no shift
   command(0x01);  // clear; next write is one scheduler period later
+  rowCacheValid_[0] = false;
+  rowCacheValid_[1] = false;
   initialized_ = true;
   bootScreenActive_ = true;
+  bootScreenStartedMs_ = nowMs;
   bootScreenUntilMs_ = nowMs + config::LCD_BOOT_SCREEN_MS;
   return false;
 }
@@ -77,7 +111,10 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                      const TemperatureProfile &profile, bool setpointEditActive,
                      float editSetpointC, bool setpointConfirming,
                      bool confirmOk, LocalUiMode uiMode, uint8_t menuSelection,
-                     float calibrationTargetC, float heatFluxKwM2) {
+                     float calibrationTargetC, bool heatFluxShowWm2,
+                     float heatFluxKwM2,
+                     const Thermocouples &thermocouples,
+                     const HeatFluxSensor &heatFlux) {
   if (!config::LCD_ENABLED) return;
   if (!initialized_) {
     initializeStep(nowMs);
@@ -85,31 +122,89 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
   }
   if (bootScreenActive_) {
     if (static_cast<int32_t>(nowMs - bootScreenUntilMs_) < 0) {
-      writeLine(0, "      CONE      ");
-      writeLine(1, "     HEATER     ");
+      const uint32_t elapsedMs = nowMs - bootScreenStartedMs_;
+      writeCenteredLine(0, "CONE HEIZER");
+      if (elapsedMs < config::LCD_SPLASH_INTRO_MS) {
+        writeCenteredLine(1, "");
+        return;
+      }
+      const uint32_t sequenceElapsedMs = elapsedMs - config::LCD_SPLASH_INTRO_MS;
+      const uint8_t deviceIndex = sequenceElapsedMs / config::LCD_SPLASH_DEVICE_MS;
+      const uint32_t deviceElapsedMs = sequenceElapsedMs % config::LCD_SPLASH_DEVICE_MS;
+      char label[16];
+      char status[20];
+      bool deviceOk = false;
+      if (deviceIndex == 0) {
+        snprintf(label, sizeof(label), "ADS1220");
+        deviceOk = heatFlux.responsive();
+      } else {
+        const uint8_t tcIndex = deviceIndex - 1;
+        const ThermocoupleChannel &channel = thermocouples.channel(tcIndex);
+        snprintf(label, sizeof(label), "MAX31855 %u", tcIndex + 1);
+        deviceOk = channel.faultFlags == 0 && isfinite(channel.temperatureC);
+      }
+      if (deviceElapsedMs >= config::LCD_SPLASH_RESULT_DELAY_MS)
+        snprintf(status, sizeof(status), "%s %s", label, deviceOk ? "PASS" : "FAIL");
+      else
+        snprintf(status, sizeof(status), "%s %s", label, "    ");
+      writeCenteredLine(1, status);
       return;
     }
     bootScreenActive_ = false;
   }
   char line1[24], line2[24];
-  if (state.status == SystemStatus::FAULT) {
+  char temperature[8], setpoint[8], output[8], value[12];
+  if (uiMode == LocalUiMode::START_MENU) {
+    static const char *const items[] = {"SET SP", "TC VIEW", "HEATFLUX", "HEIZER KAL."};
+    const uint8_t count = sizeof(items) / sizeof(items[0]);
+    snprintf(line1, sizeof(line1), ">%-.15s", items[menuSelection % count]);
+    snprintf(line2, sizeof(line2), " %-15s", items[(menuSelection + 1) % count]);
+  } else if (uiMode == LocalUiMode::TC_VIEW) {
+    const ThermocoupleChannel &tc1 = thermocouples.channel(0);
+    const ThermocoupleChannel &tc2 = thermocouples.channel(1);
+    const ThermocoupleChannel &tc3 = thermocouples.channel(2);
+    formatFloat(temperature, sizeof(temperature),
+                tc1.electricallyValid && tc1.plausible ? tc1.temperatureC : NAN, 5, 1);
+    formatFloat(value, sizeof(value),
+                tc2.electricallyValid && tc2.plausible ? tc2.temperatureC : NAN, 5, 1);
+    snprintf(line1, sizeof(line1), "1:%s 2:%s", temperature, value);
+    formatFloat(temperature, sizeof(temperature),
+                tc3.electricallyValid && tc3.plausible ? tc3.temperatureC : NAN, 5, 1);
+    snprintf(line2, sizeof(line2), "3:%s N:%u", temperature, state.validTcCount);
+  } else if (uiMode == LocalUiMode::HEATFLUX_VIEW) {
+    snprintf(line1, sizeof(line1), "HEATFLUX %s", heatFluxShowWm2 ? "W/m2" : "RAW");
+    if (!heatFlux.enabled()) snprintf(line2, sizeof(line2), "DISABLED");
+    else if (heatFlux.fault()) snprintf(line2, sizeof(line2), "SENSOR FAULT");
+    else if (!heatFlux.valid()) snprintf(line2, sizeof(line2), "WAITING");
+    else if (heatFluxShowWm2 && !heatFlux.calibrationValid())
+      snprintf(line2, sizeof(line2), "UNCALIBRATED");
+    else {
+      if (heatFluxShowWm2) {
+        formatFloat(value, sizeof(value), heatFluxKwM2 * 1000.0f, 6, 2);
+        snprintf(line2, sizeof(line2), "VAL:%s W/m2", value);
+      } else {
+        formatFloat(value, sizeof(value), heatFlux.rawValue() * 1000.0f, 6, 2);
+        snprintf(line2, sizeof(line2), "RAW:%s mV", value);
+      }
+    }
+  } else if (state.status == SystemStatus::FAULT) {
     snprintf(line1, sizeof(line1), "FAULT %08lX", static_cast<unsigned long>(state.errors));
     snprintf(line2, sizeof(line2), "%s", (state.errors & ERROR_OVERTEMP) ? "OVERTEMPERATURE" : "TC SENSOR ERROR");
-  } else if (uiMode == LocalUiMode::START_MENU) {
-    snprintf(line1, sizeof(line1), "%cSETPOINT", menuSelection == 0 ? '>' : ' ');
-    snprintf(line2, sizeof(line2), "%cHEIZER KAL.", menuSelection == 1 ? '>' : ' ');
   } else if (uiMode == LocalUiMode::HEATER_CAL_READY ||
              uiMode == LocalUiMode::HEATER_CAL_RUNNING) {
-    snprintf(line1, sizeof(line1), "KAL T:%5.1f SP:%3.0f", state.controlTemperatureC,
-             calibrationTargetC);
+    formatFloat(temperature, sizeof(temperature), state.controlTemperatureC, 5, 1);
+    formatFloat(setpoint, sizeof(setpoint), calibrationTargetC, 3, 0);
+    snprintf(line1, sizeof(line1), "KAL T:%s SP:%s", temperature, setpoint);
     if (uiMode == LocalUiMode::HEATER_CAL_READY)
       snprintf(line2, sizeof(line2), "START: KURZ DR.");
-    else if (isfinite(heatFluxKwM2))
-      snprintf(line2, sizeof(line2), "HF:%6.2f KURZ=STOP", heatFluxKwM2);
-    else
+    else if (isfinite(heatFluxKwM2)) {
+      formatFloat(value, sizeof(value), heatFluxKwM2, 6, 2);
+      snprintf(line2, sizeof(line2), "HF:%s KURZ=STOP", value);
+    } else
       snprintf(line2, sizeof(line2), "HF:-- KURZ=STOP");
   } else if (setpointEditActive) {
-    snprintf(line1, sizeof(line1), "SET SP:%5.1f C", editSetpointC);
+    formatFloat(setpoint, sizeof(setpoint), editSetpointC, 5, 1);
+    snprintf(line1, sizeof(line1), "SET SP:%s C", setpoint);
     if (setpointConfirming) {
       snprintf(line2, sizeof(line2), confirmOk ? "OK<    ABBR." : "OK     ABBR.<");
     } else {
@@ -117,19 +212,24 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
     }
   } else if (state.mode == OperatingMode::PROFILE && profile.currentStep()) {
     const ProfileStep *step = profile.currentStep();
-    snprintf(line1, sizeof(line1), "T:%5.1f SP:%3.0f", state.controlTemperatureC, state.setpointC);
-    if (step->type == ProfileStepType::RAMP)
-      snprintf(line2, sizeof(line2), "B%02u RAMP %3.1fK/m", profile.currentStepNumber(), step->rateKPerMin);
-    else
+    formatFloat(temperature, sizeof(temperature), state.controlTemperatureC, 5, 1);
+    formatFloat(setpoint, sizeof(setpoint), state.setpointC, 3, 0);
+    snprintf(line1, sizeof(line1), "T:%s SP:%s", temperature, setpoint);
+    if (step->type == ProfileStepType::RAMP) {
+      formatFloat(value, sizeof(value), step->rateKPerMin, 3, 1);
+      snprintf(line2, sizeof(line2), "B%02u RAMP %sK/m", profile.currentStepNumber(), value);
+    } else
       snprintf(line2, sizeof(line2), "B%02u %-4s %02lu:%02lu", profile.currentStepNumber(),
                TemperatureProfile::typeName(step->type),
                static_cast<unsigned long>(profile.remainingSeconds(nowMs) / 60),
                static_cast<unsigned long>(profile.remainingSeconds(nowMs) % 60));
   } else if (page_ == 0) {
-    snprintf(line1, sizeof(line1), "T:%5.1f %s", state.controlTemperatureC,
+    formatFloat(temperature, sizeof(temperature), state.controlTemperatureC, 5, 1);
+    formatFloat(setpoint, sizeof(setpoint), state.setpointC, 3, 0);
+    formatFloat(output, sizeof(output), state.outputPercent, 3, 0);
+    snprintf(line1, sizeof(line1), "T:%s %s", temperature,
              state.serialUiConnected ? "PC" : "LOC");
-    snprintf(line2, sizeof(line2), "SP:%3.0f O:%3.0f %s", state.setpointC,
-             state.outputPercent,
+    snprintf(line2, sizeof(line2), "SP:%s O:%s %s", setpoint, output,
              state.status == SystemStatus::DEGRADED ? "DEG" : "OK");
   } else {
     snprintf(line1, sizeof(line1), "MODE:%s", modeName(state.mode));

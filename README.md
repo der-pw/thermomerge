@@ -56,8 +56,9 @@ Es gibt keine `delay()`-basierte Prozesssteuerung und keine blockierenden Serial
 | Thermoelemente und Plausibilität | 100 ms |
 | PID / Autotune | feste 100 ms |
 | optionaler Wärmestrom-ADC | 150 ms |
-| Telemetrie | 250 ms |
-| LCD | 500 ms |
+| Telemetrie | 500 ms |
+| LCD-Menü | 100 ms |
+| LCD-Wert-/Statusseiten | 500 ms |
 | SSR-Burst-Window | 1000 ms |
 
 Der Serial-Parser verarbeitet höchstens 64 Zeichen pro Schleifendurchlauf. Ausgaben laufen über einen statischen 2048-Byte-TX-Ringpuffer und werden nur bis zum aktuell freien USB-CDC-Puffer übertragen; automatische Telemetrie wird bei Rückstau verworfen statt die Regelung anzuhalten. Auch ein dauerhaft sendender oder nicht mehr lesender Host kann dadurch die Regelaufgaben nicht verdrängen. Profile und Regelung benötigen nach dem Start keine USB-Verbindung.
@@ -122,10 +123,31 @@ Autotune wird vom Rechner gestartet. Ein Relay-Verfahren erzeugt kontrollierte S
 
 ## Lokale Bedienung
 
-- Nach der LCD-Initialisierung zeigt das Display vier Sekunden zentriert
-  `CONE` und `HEATER`; anschließend erscheint das Startmenü.
-- Nach dem Start erscheint zunächst ein Auswahlmenü mit `SETPOINT` und
-  `HEIZER KAL.`. Drehen wählt, kurzer Tastendruck öffnet den Menüpunkt.
+- Der Splashscreen zeigt zunächst zwei Sekunden lang nur `CONE HEIZER`, dann
+  nacheinander den ADS1220 und die drei MAX31855-
+  Thermoelementwandler. Jeder Eintrag bleibt drei Sekunden sichtbar; während
+  der ersten Sekunde bleibt der vierstellige Ergebnisplatz frei, danach
+  erscheint `PASS` oder `FAIL`. Der Gerätename behält dabei dieselbe
+  Zentrierung. `PASS` beim ADS1220 bestätigt den Register-Readback über SPI,
+  bei den MAX31855 eine endliche Temperatur ohne gesetzte Fehlerflags. Danach
+  erscheint die normale Statusseite mit gemittelter Temperatur und
+  Bedienstatus (`LOC`).
+- Die Statusseite erscheint direkt nach dem Start. Kurzer Tastendruck wechselt
+  zwischen den beiden Statusseiten. Langer Tastendruck öffnet außerhalb von
+  `PROFILE` und `AUTOTUNE` das lokale Menü.
+- Das Menü enthält in dieser Reihenfolge `SET SP`, `TC VIEW`, `HEATFLUX`
+  und `HEIZER KAL.`. Das Display zeigt den markierten Eintrag und den folgenden
+  Eintrag; Drehen verschiebt die Auswahl zyklisch durch alle vier Punkte.
+  Kurzer Tastendruck öffnet den markierten Punkt. Langer Tastendruck im Menü
+  kehrt zur Statusseite zurück.
+- `TC VIEW` zeigt die drei plausibilisierten Thermoelementwerte; nicht
+  verfügbare Kanäle erscheinen als `--`. `HEATFLUX` startet in `RAW` und zeigt
+  die Rohspannung in mV. Drehen wechselt zwischen `RAW` und `W/m2`; der
+  gewählte Modus steht in der Überschrift. `W/m2` wird aus dem kalibrierten
+  Engineering-Wert berechnet. Ohne gültige Kalibrierung erscheint dort
+  `UNCALIBRATED`. Bei deaktiviertem Backend, Sensorfehler oder ungültiger
+  Messung wird der entsprechende Sensorstatus angezeigt. Kurzer oder langer
+  Tastendruck schließt die Ansichten und kehrt zur Statusseite zurück.
 - `HEIZER KAL.` besitzt einen zusätzlichen Startschritt: Zuerst wird die
   Zieltemperatur gewählt, anschließend startet ein kurzer Tastendruck den
   PID-Betrieb. Während des Anfahrens kann die Zieltemperatur weiter mit dem
@@ -134,22 +156,45 @@ Autotune wird vom Rechner gestartet. Ein Relay-Verfahren erzeugt kontrollierte S
 - Während der Kalibrieransicht werden Isttemperatur, Zieltemperatur und –
   sobald kalibriert – die Wärmestromdichte angezeigt. Die Messwerte erscheinen
   weiterhin auch in der seriellen Telemetrie.
-- Langer Tastendruck öffnet außerhalb von `PROFILE` und `AUTOTUNE` den
-  Sollwertdialog.
-- Drehen verändert einen vorläufigen Sollwert; ein kurzer Tastendruck öffnet
-  die Bestätigung `OK`/`ABBR.`. Drehen wählt die Aktion, kurzer Tastendruck
-  bestätigt sie. Ein langer Tastendruck bricht den Dialog ab.
+- `SET SP` öffnet den Sollwertdialog. Änderungen bleiben zunächst vorläufig;
+  kurzer Tastendruck öffnet `OK`/`ABBR.`. Drehen wählt die Aktion, kurzer
+  Tastendruck bestätigt sie. `OK` übernimmt den Wert, `ABBR.` verwirft ihn.
+  Langer Tastendruck bricht den Dialog ab. Er bleibt außerhalb von `PROFILE`
+  und `AUTOTUNE` verfügbar.
 - Der bestätigte Sollwert wird verzögert gespeichert. PID- und Autotune-
   Steuerung sowie PID-Parameter bleiben seriell.
-- Kurzer Tastendruck außerhalb des Dialogs wechselt die LCD-Statusseite.
+- Kurzer Tastendruck auf der normalen Statusseite wechselt die LCD-Statusseite.
 
 Profile werden nicht lokal editiert.
 
 ### Display-Mockups (1602)
 
-Die folgenden Beispiele zeigen die vorgesehenen 16×2-Anzeigen. Die LCD-Seite
-wird alle 500 ms aktualisiert; `PC` bedeutet, dass `UI,CONNECT` aktiv ist und
+Die folgenden Beispiele zeigen die vorgesehenen 16×2-Anzeigen. Das Menü wird
+alle 100 ms, Wert- und Statusseiten werden alle 500 ms aktualisiert. Die
+serielle Telemetrie läuft unabhängig davon ebenfalls alle 500 ms. `PC` bedeutet,
+dass `UI,CONNECT` aktiv ist und
 der Encoder gesperrt wurde, `LOC` steht für lokale Bedienfreigabe.
+
+Splashscreen, jeweils mittig ausgerichtet. Nach zwei Sekunden Intro folgt der
+ADS1220. Der Status erscheint eine Sekunde nach dem Gerätenamen; nach drei
+Sekunden folgt der nächste Eintrag:
+
+```text
+CONE HEIZER
+
+... zwei Sekunden ...
+ADS1220
+... eine Sekunde ...
+ADS1220 PASS
+... drei Sekunden insgesamt ...
+MAX31855 1
+... eine Sekunde ...
+MAX31855 1 PASS
+... anschließend MAX31855 2 und 3 ...
+```
+
+Bei fehlgeschlagener Prüfung steht anstelle von `PASS` jeweils `FAIL`; vor
+dem Ergebnis bleibt dessen vierstelliger Platz leer.
 
 Lokaler Grundzustand (`OFF`):
 
@@ -175,7 +220,35 @@ MODE:PID
 TC:3 ERR:0000
 ```
 
-Sollwertdialog nach Longpress:
+Menü nach Longpress (Auswahl `SET SP`; der nächste Eintrag steht darunter):
+
+```text
+>SET SP
+ TC VIEW
+```
+
+Thermoelementansicht:
+
+```text
+1: 23.0 2: 22.5
+3: 23.0 N:3
+```
+
+HEATFLUX in `RAW` bei gültiger Rohmessung (keine Wärmestromkalibrierung nötig):
+
+```text
+HEATFLUX RAW
+RAW:  1.25 mV
+```
+
+HEATFLUX in `W/m2` nach Kalibrierung:
+
+```text
+HEATFLUX W/m2
+VAL:1250.00 W/m2
+```
+
+Sollwertdialog nach Auswahl von `SET SP`:
 
 ```text
 SET SP:500.0 C
@@ -232,7 +305,9 @@ T:499.2 LOC
 SP:500 O: 25 DEG
 ```
 
-Sicherheitsfehler haben Vorrang vor allen Betriebsanzeigen:
+Auf der normalen Statusseite haben Sicherheitsfehler Vorrang vor
+Betriebsanzeigen. Die Diagnoseansichten `TC VIEW` und `HEATFLUX` bleiben
+für die Fehlersuche aufrufbar:
 
 ```text
 FAULT 00002000

@@ -39,8 +39,10 @@ bool setpointConfirming = false;
 bool setpointConfirmOk = true;
 float editSetpointC = config::DEFAULT_SETPOINT_C;
 bool lastSerialUiConnected = false;
-LocalUiMode localUiMode = LocalUiMode::START_MENU;
+// Show live temperature and local ownership immediately after boot.
+LocalUiMode localUiMode = LocalUiMode::NORMAL;
 uint8_t menuSelection = 0;
+bool heatFluxShowWm2 = false;
 float heaterCalibrationTargetC = config::DEFAULT_SETPOINT_C;
 
 constexpr uint32_t TC_ERROR_MASK = 0x00000FFFUL;
@@ -102,7 +104,12 @@ void updateEncoder(uint32_t nowMs) {
     return;
   }
   if (localUiMode == LocalUiMode::START_MENU) {
-    if (events.detents != 0) menuSelection = events.detents > 0 ? 1 : 0;
+    if (events.detents != 0) {
+      int16_t selection = static_cast<int16_t>(menuSelection) + events.detents;
+      selection %= 4;
+      if (selection < 0) selection += 4;
+      menuSelection = static_cast<uint8_t>(selection);
+    }
     if (events.shortPress) {
       if (menuSelection == 0) {
         localUiMode = LocalUiMode::NORMAL;
@@ -111,11 +118,24 @@ void updateEncoder(uint32_t nowMs) {
         setpointConfirming = false;
         setpointConfirmOk = true;
         display.showMainPage();
+      } else if (menuSelection == 1) {
+        localUiMode = LocalUiMode::TC_VIEW;
+      } else if (menuSelection == 2) {
+        localUiMode = LocalUiMode::HEATFLUX_VIEW;
+        heatFluxShowWm2 = false;
       } else {
         heaterCalibrationTargetC = systemState.setpointC;
         localUiMode = LocalUiMode::HEATER_CAL_READY;
       }
     }
+    if (events.longPress) localUiMode = LocalUiMode::NORMAL;
+    return;
+  }
+  if (localUiMode == LocalUiMode::TC_VIEW ||
+      localUiMode == LocalUiMode::HEATFLUX_VIEW) {
+    if (localUiMode == LocalUiMode::HEATFLUX_VIEW && events.detents % 2 != 0)
+      heatFluxShowWm2 = !heatFluxShowWm2;
+    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
     return;
   }
   if (localUiMode == LocalUiMode::HEATER_CAL_READY ||
@@ -153,7 +173,8 @@ void updateEncoder(uint32_t nowMs) {
   if (setpointEditActive) {
     if (events.detents != 0) {
       if (setpointConfirming) {
-        setpointConfirmOk = events.detents > 0;
+        // OK is the left choice and ABBR. the right choice on the LCD.
+        setpointConfirmOk = events.detents < 0;
       } else {
         editSetpointC = constrain(editSetpointC + events.detents * config::ENCODER_STEP_C,
                                   config::MIN_SETPOINT_C, config::MAX_SETPOINT_C);
@@ -178,13 +199,10 @@ void updateEncoder(uint32_t nowMs) {
     }
     return;
   }
-  if (events.longPress && systemState.status != SystemStatus::FAULT &&
-      systemState.mode != OperatingMode::PROFILE &&
+  if (events.longPress && systemState.mode != OperatingMode::PROFILE &&
       systemState.mode != OperatingMode::AUTOTUNE) {
-    editSetpointC = systemState.setpointC;
-    setpointEditActive = true;
-    setpointConfirming = false;
-    setpointConfirmOk = true;
+    menuSelection = 0;
+    localUiMode = LocalUiMode::START_MENU;
   } else if (events.shortPress) {
     display.nextPage();
   }
@@ -326,13 +344,17 @@ void loop() {
     lastTelemetryMs = nowMs;
     protocol.telemetry(nowMs, heatFlux);
   }
-  if (nowMs - lastDisplayMs >= config::LCD_INTERVAL_MS) {
+  const uint32_t displayIntervalMs = localUiMode == LocalUiMode::START_MENU
+      ? config::LCD_MENU_INTERVAL_MS : config::LCD_VALUE_INTERVAL_MS;
+  if (nowMs - lastDisplayMs >= displayIntervalMs) {
     lastDisplayMs = nowMs;
     display.update(nowMs, systemState, profile, setpointEditActive,
                    editSetpointC, setpointConfirming, setpointConfirmOk,
                    localUiMode, menuSelection, heaterCalibrationTargetC,
+                   heatFluxShowWm2,
                    heatFlux.valid() && heatFlux.calibrationValid()
-                       ? heatFlux.engineeringValue() : NAN);
+                       ? heatFlux.engineeringValue() : NAN,
+                   thermocouples, heatFlux);
   }
   settings.update(nowMs, pid, systemState, heatFlux);
   protocol.serviceTx();

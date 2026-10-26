@@ -67,7 +67,7 @@ Dashboard
       │  ├─ Übertemperatur weiterhin ≥ 780 °C → FAULT ACTIVE
       │  ├─ keine gültigen Thermoelemente → CHECK TC INPUTS
       │  └─ Fehlerursache beseitigt → FAULT CLEARED, Modus OFF
-      │     └─ Kurz- oder Longpress → Hauptmenü
+      │     └─ Kurz- oder Longpress nach Ergebnis → Dashboard
       └─ Longpress im Hauptmenü → Dashboard
 
 Dashboard während SETPOINT-Regelung:
@@ -89,7 +89,7 @@ Dashboard während SETPOINT-Regelung:
 | `PID HEATER → AUTOTUNE` | Separater Autotune-Zielwert, Startabfrage und kompakte Status-/Ergebnisanzeige. Detailwerte bleiben seriell. | Longpress in der Zielbearbeitung geht zurück zu PID HEATER; in der Startabfrage zurück zur Zielbearbeitung. `CANCEL` führt zu PID HEATER. Im Lauf stoppt jeder Tastendruck; vom Ergebnis führt Kurzdruck zum Dashboard und Longpress zu PID HEATER. |
 | `PID HEATER → MANUAL` | Kp, Ki und Kd bearbeiten. `SAVE` fragt YES/NO; beide Antworten übernehmen die Werte, nur YES speichert sie dauerhaft. | Longpress in Bearbeitung geht zur Parameterauswahl, von dort zu PID HEATER und aus der SAVE-Abfrage zurück zur SAVE-Auswahl. YES/NO führt ins Hauptmenü. |
 | `SSR TEST` | Bei Modus OFF, gültiger Temperatur und ohne FAULT schaltet er den SSR dreimal 500 ms ein, mit 500-ms-AUS-Pausen. | Kurzdruck bricht ab und führt zum Dashboard; Longpress bricht ab und führt ins Hauptmenü. Automatisches Ende führt ebenfalls ins Hauptmenü. |
-| `FAULT CLEAR` | Setzt verriegelte Fehler nach Beseitigung ihrer Ursache zurück. Übertemperatur bleibt bis unter 780 °C gesperrt; fehlende gültige Thermoelemente müssen zuerst behoben werden. Ein erfolgreicher Reset lässt den Modus auf OFF und startet den Heizer nicht. | Kurz- oder Longpress nach der Ergebnisanzeige führt zurück ins Hauptmenü. |
+| `FAULT CLEAR` | Setzt verriegelte Fehler nach Beseitigung ihrer Ursache zurück. Übertemperatur bleibt bis unter 780 °C gesperrt; fehlende gültige Thermoelemente müssen zuerst behoben werden. Ein erfolgreicher Reset lässt den Modus auf OFF und startet den Heizer nicht. | Kurz- oder Longpress nach der Ergebnisanzeige führt direkt zum Dashboard. |
 
 Im Hauptmenü bringt Longpress zurück zum Dashboard. Im laufenden SETPOINT-
 Dashboard beendet Longpress außerhalb der Vorschau den Regelkreis und setzt

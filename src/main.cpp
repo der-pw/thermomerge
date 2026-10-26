@@ -219,7 +219,7 @@ void updateEncoder(uint32_t nowMs) {
       localUiMode == LocalUiMode::FAULT_CLEAR_CHECK_TC ||
       localUiMode == LocalUiMode::FAULT_CLEAR_NO_FAULT) {
     if (events.shortPress || events.longPress)
-      localUiMode = LocalUiMode::START_MENU;
+      localUiMode = LocalUiMode::NORMAL;
     return;
   }
   if (localUiMode == LocalUiMode::PID_HEATER_MENU) {

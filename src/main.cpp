@@ -33,10 +33,13 @@ uint32_t lastDisplayMs = 0;
 uint32_t lastSensorTaskCompletedMs = 0;
 uint32_t lastLedMs = 0;
 bool ledState = false;
+bool displayRefreshRequested = false;
 bool autotuneReported = false;
 bool setpointEditActive = false;
 bool setpointConfirming = false;
 bool setpointConfirmOk = true;
+bool dashboardSetpointEditActive = false;
+float dashboardEditSetpointC = config::DEFAULT_SETPOINT_C;
 uint32_t lastSetpointDetentMs = 0;
 bool hasLastSetpointDetent = false;
 float editSetpointC = config::DEFAULT_SETPOINT_C;
@@ -127,7 +130,6 @@ void stopLocalSetpoint(uint32_t nowMs) {
   systemState.setpointC = 0.0f;
   systemState.outputPercent = 0.0f;
   heater.forceOff();
-  settings.markSetpointDirty(nowMs, 0.0f);
   setpointEditActive = false;
   setpointConfirming = false;
   hasLastSetpointDetent = false;
@@ -139,13 +141,18 @@ void updateEncoder(uint32_t nowMs) {
     // Remote ownership blocks all local encoder actions, including page changes.
     setpointEditActive = false;
     setpointConfirming = false;
+    dashboardSetpointEditActive = false;
     return;
+  }
+  if (dashboardSetpointEditActive && systemState.mode != OperatingMode::SETPOINT) {
+    dashboardSetpointEditActive = false;
+    hasLastSetpointDetent = false;
   }
   if (localUiMode == LocalUiMode::START_MENU) {
     if (events.detents != 0) {
       int16_t selection = static_cast<int16_t>(menuSelection) + events.detents;
-      selection %= 5;
-      if (selection < 0) selection += 5;
+      selection %= 4;
+      if (selection < 0) selection += 4;
       menuSelection = static_cast<uint8_t>(selection);
     }
     if (events.shortPress) {
@@ -165,11 +172,9 @@ void updateEncoder(uint32_t nowMs) {
           display.showMainPage();
         }
       } else if (menuSelection == 1) {
-        localUiMode = LocalUiMode::TC_VIEW;
-      } else if (menuSelection == 2) {
         localUiMode = LocalUiMode::HEATFLUX_VIEW;
         heatFluxShowWm2 = false;
-      } else if (menuSelection == 3) {
+      } else if (menuSelection == 2) {
         pidHeaterSelection = 0;
         localUiMode = LocalUiMode::PID_HEATER_MENU;
       } else {
@@ -231,7 +236,11 @@ void updateEncoder(uint32_t nowMs) {
         localUiMode = LocalUiMode::PID_MANUAL_EDIT;
       }
     }
-    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    if (events.longPress) {
+      hasLastSetpointDetent = false;
+      localUiMode = localUiMode == LocalUiMode::PID_MANUAL_EDIT
+          ? LocalUiMode::PID_MANUAL_SELECT : LocalUiMode::PID_HEATER_MENU;
+    }
     return;
   }
   if (localUiMode == LocalUiMode::PID_MANUAL_SAVE_CONFIRM) {
@@ -241,25 +250,30 @@ void updateEncoder(uint32_t nowMs) {
       if (setpointConfirmOk) settings.markDirty(nowMs);
       localUiMode = LocalUiMode::START_MENU;
     }
-    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    if (events.longPress) {
+      pidManualSelection = 3;
+      localUiMode = LocalUiMode::PID_MANUAL_SELECT;
+    }
     return;
   }
-  if (localUiMode == LocalUiMode::TC_VIEW ||
-      localUiMode == LocalUiMode::HEATFLUX_VIEW) {
+  if (localUiMode == LocalUiMode::HEATFLUX_VIEW) {
     if (localUiMode == LocalUiMode::HEATFLUX_VIEW && events.detents % 2 != 0)
       heatFluxShowWm2 = !heatFluxShowWm2;
-    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.shortPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
     return;
   }
   if (localUiMode == LocalUiMode::SSR_TEST) {
     if (events.shortPress || events.longPress) {
       heater.cancelTest();
-      localUiMode = LocalUiMode::NORMAL;
+      localUiMode = events.longPress ? LocalUiMode::START_MENU
+                                     : LocalUiMode::NORMAL;
     }
     return;
   }
   if (localUiMode == LocalUiMode::SSR_TEST_BLOCKED) {
-    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.shortPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
     return;
   }
   if (localUiMode == LocalUiMode::AUTOTUNE_SETPOINT) {
@@ -280,7 +294,7 @@ void updateEncoder(uint32_t nowMs) {
       localUiMode = LocalUiMode::AUTOTUNE_CONFIRM;
     }
     if (events.longPress) {
-      localUiMode = LocalUiMode::START_MENU;
+      localUiMode = LocalUiMode::PID_HEATER_MENU;
       hasLastSetpointDetent = false;
     }
     return;
@@ -293,10 +307,10 @@ void updateEncoder(uint32_t nowMs) {
         localUiMode = startLocalAutotune(nowMs)
             ? LocalUiMode::AUTOTUNE_RUNNING : LocalUiMode::AUTOTUNE_BLOCKED;
       } else {
-        localUiMode = LocalUiMode::START_MENU;
+        localUiMode = LocalUiMode::PID_HEATER_MENU;
       }
     }
-    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    if (events.longPress) localUiMode = LocalUiMode::AUTOTUNE_SETPOINT;
     return;
   }
   if (localUiMode == LocalUiMode::AUTOTUNE_RUNNING) {
@@ -315,7 +329,8 @@ void updateEncoder(uint32_t nowMs) {
   }
   if (localUiMode == LocalUiMode::AUTOTUNE_RESULT ||
       localUiMode == LocalUiMode::AUTOTUNE_BLOCKED) {
-    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.shortPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.longPress) localUiMode = LocalUiMode::PID_HEATER_MENU;
     return;
   }
   if (setpointEditActive) {
@@ -340,7 +355,6 @@ void updateEncoder(uint32_t nowMs) {
       } else if (setpointConfirmOk) {
         if (systemState.status != SystemStatus::FAULT && systemState.temperatureReady) {
           systemState.setpointC = editSetpointC;
-          settings.markSetpointDirty(nowMs, systemState.setpointC);
           pid.reset(systemState.controlTemperatureC, systemState.outputPercent,
                     systemState.setpointC);
           systemState.mode = OperatingMode::SETPOINT;
@@ -368,17 +382,58 @@ void updateEncoder(uint32_t nowMs) {
     if (events.longPress) localUiMode = LocalUiMode::START_MENU;
     return;
   }
+  if (!dashboardSetpointEditActive && events.shortPress &&
+      localUiMode == LocalUiMode::NORMAL &&
+      systemState.mode == OperatingMode::SETPOINT &&
+      systemState.status != SystemStatus::FAULT && systemState.temperatureReady) {
+    dashboardSetpointEditActive = true;
+    dashboardEditSetpointC = systemState.setpointC;
+    hasLastSetpointDetent = false;
+    display.showMainPage();
+    displayRefreshRequested = true;
+    return;
+  }
+  if (dashboardSetpointEditActive) {
+    if (events.detents != 0) {
+      const bool fastTurn = events.detents > 1 || events.detents < -1 ||
+          (hasLastSetpointDetent &&
+           nowMs - lastSetpointDetentMs <= config::ENCODER_FAST_TURN_INTERVAL_MS);
+      const float stepC = config::ENCODER_STEP_C * (fastTurn ? 10.0f : 1.0f);
+      dashboardEditSetpointC = constrain(
+          dashboardEditSetpointC + events.detents * stepC,
+          config::MIN_SETPOINT_C, config::MAX_SETPOINT_C);
+      lastSetpointDetentMs = nowMs;
+      hasLastSetpointDetent = true;
+    }
+    if (events.shortPress) {
+      systemState.setpointC = dashboardEditSetpointC;
+      pid.reset(systemState.controlTemperatureC, systemState.outputPercent,
+                systemState.setpointC);
+      dashboardSetpointEditActive = false;
+      hasLastSetpointDetent = false;
+      displayRefreshRequested = true;
+      return;
+    }
+    if (events.longPress) {
+      dashboardSetpointEditActive = false;
+      hasLastSetpointDetent = false;
+      displayRefreshRequested = true;
+      return;
+    }
+    return;
+  }
   if (events.longPress && systemState.mode == OperatingMode::SETPOINT) {
     stopLocalSetpoint(nowMs);
-    localUiMode = LocalUiMode::NORMAL;
+    displayRefreshRequested = true;
     return;
   }
   if (events.longPress && systemState.mode != OperatingMode::PROFILE &&
       systemState.mode != OperatingMode::AUTOTUNE) {
     menuSelection = 0;
     localUiMode = LocalUiMode::START_MENU;
-  } else if (events.shortPress) {
+  } else if (events.detents != 0 && localUiMode == LocalUiMode::NORMAL) {
     display.nextPage();
+    displayRefreshRequested = true;
   }
 }
 
@@ -477,7 +532,7 @@ void setup() {
   Serial.begin(115200);
 
   pid.setTunings(config::DEFAULT_KP, config::DEFAULT_KI, config::DEFAULT_KD);
-  systemState.setpointC = config::DEFAULT_SETPOINT_C;
+  systemState.setpointC = 0.0f;
   settings.begin(pid, systemState, heatFlux);
   thermocouples.begin();
   encoder.begin();
@@ -522,7 +577,7 @@ void loop() {
       systemState.status != SystemStatus::FAULT && systemState.temperatureReady;
   heater.update(nowMs, heatingAllowed(systemState), ssrTestPermitted);
   if (localUiMode == LocalUiMode::SSR_TEST && !heater.testActive())
-    localUiMode = LocalUiMode::NORMAL;
+    localUiMode = LocalUiMode::START_MENU;
   updateStatusLed(nowMs);
 
   if (nowMs - lastTelemetryMs >= config::TELEMETRY_INTERVAL_MS) {
@@ -536,10 +591,11 @@ void loop() {
               localUiMode == LocalUiMode::PID_HEATER_MENU ||
               localUiMode == LocalUiMode::PID_MANUAL_SELECT ||
               localUiMode == LocalUiMode::PID_MANUAL_EDIT ||
-              localUiMode == LocalUiMode::PID_MANUAL_SAVE_CONFIRM
+              localUiMode == LocalUiMode::PID_MANUAL_SAVE_CONFIRM ||
+              dashboardSetpointEditActive
           ? config::LCD_INTERACTION_INTERVAL_MS
           : config::LCD_MEASUREMENT_INTERVAL_MS;
-  if (nowMs - lastDisplayMs >= displayIntervalMs) {
+  if (displayRefreshRequested || nowMs - lastDisplayMs >= displayIntervalMs) {
     lastDisplayMs = nowMs;
     display.update(nowMs, systemState, profile, setpointEditActive,
                    editSetpointC, setpointConfirming, setpointConfirmOk,
@@ -547,10 +603,12 @@ void loop() {
                    localUiMode, menuSelection,
                    editAutotuneTargetC,
                    pidHeaterSelection, pidManualSelection, manualKp, manualKi, manualKd,
+                   dashboardSetpointEditActive, dashboardEditSetpointC,
                    heatFluxShowWm2,
                    heatFlux.valid() && heatFlux.calibrationValid()
                        ? heatFlux.engineeringValue() : NAN,
                    thermocouples, heatFlux);
+    displayRefreshRequested = false;
   }
   settings.update(nowMs, pid, systemState, heatFlux);
   protocol.serviceTx();

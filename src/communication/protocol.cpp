@@ -159,7 +159,6 @@ void SerialProtocol::handleSet(char **tokens, uint8_t count, uint32_t nowMs) {
     if (state_.mode == OperatingMode::PROFILE) { replyError(F("PROFILE_OWNS_SETPOINT")); return; }
     if (value < config::MIN_SETPOINT_C || value > config::MAX_SETPOINT_C) { replyError(F("OUT_OF_RANGE")); return; }
     state_.setpointC = value;
-    settings_.markSetpointDirty(nowMs, state_.setpointC);
     tx_.print(F("OK,SP=")); tx_.println(state_.setpointC, 1);
     return;
   }

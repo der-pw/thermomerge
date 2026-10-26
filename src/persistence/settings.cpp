@@ -35,15 +35,13 @@ uint32_t checksum(const StoredSettings &settings) {
 
 bool valid(const StoredSettings &s) {
   // NAN is the deliberate "not calibrated" sentinel for heat flux. It must
-  // not invalidate otherwise good PID and setpoint settings.
+  // not invalidate otherwise good PID settings.
   const bool heatFluxFactorValid = isnan(s.heatFluxFactorKwM2PerV) ||
       (isfinite(s.heatFluxFactorKwM2PerV) &&
        s.heatFluxFactorKwM2PerV > 0.0f);
   return s.magic == SETTINGS_MAGIC && s.version == SETTINGS_VERSION &&
          s.checksum == checksum(s) && isfinite(s.kp) && isfinite(s.ki) && isfinite(s.kd) &&
          s.kp >= 0.0f && s.ki >= 0.0f && s.kd >= 0.0f &&
-         isfinite(s.setpointC) && s.setpointC >= config::MIN_SETPOINT_C &&
-         s.setpointC <= config::MAX_SETPOINT_C &&
          heatFluxFactorValid &&
          isfinite(s.heatFluxOffsetKwM2);
 }
@@ -59,12 +57,11 @@ void PersistentSettings::begin(PIDController &pid, RuntimeState &state,
   EEPROM.get(0, stored);
   if (valid(stored)) {
     pid.setTunings(stored.kp, stored.ki, stored.kd);
-    state.setpointC = stored.setpointC;
     heatFluxFactor_ = stored.heatFluxFactorKwM2PerV;
     heatFluxOffsetKwM2_ = stored.heatFluxOffsetKwM2;
   }
   heatFlux.setCalibration(heatFluxFactor_, heatFluxOffsetKwM2_);
-  normalSetpointC_ = state.setpointC;
+  state.setpointC = 0.0f;
 }
 
 void PersistentSettings::markDirty(uint32_t nowMs) {
@@ -72,16 +69,12 @@ void PersistentSettings::markDirty(uint32_t nowMs) {
   dirtySinceMs_ = nowMs;
 }
 
-void PersistentSettings::markSetpointDirty(uint32_t nowMs, float setpointC) {
-  normalSetpointC_ = setpointC;
-  markDirty(nowMs);
-}
-
 void PersistentSettings::markHeatFluxDirty(uint32_t nowMs,
                                             const HeatFluxSensor &heatFlux) {
   heatFluxFactor_ = heatFlux.calibrationFactor();
   heatFluxOffsetKwM2_ = heatFlux.calibrationOffset();
-  markDirty(nowMs);
+  dirty_ = true;
+  dirtySinceMs_ = nowMs;
 }
 
 void PersistentSettings::update(uint32_t nowMs, const PIDController &pid,
@@ -93,7 +86,7 @@ void PersistentSettings::update(uint32_t nowMs, const PIDController &pid,
   stored.version = SETTINGS_VERSION;
   pid.getTunings(stored.kp, stored.ki, stored.kd);
   (void)state;
-  stored.setpointC = normalSetpointC_;
+  stored.setpointC = 0.0f;
   stored.heatFluxFactorKwM2PerV = heatFlux.calibrationFactor();
   stored.heatFluxOffsetKwM2 = heatFlux.calibrationOffset();
   stored.checksum = checksum(stored);

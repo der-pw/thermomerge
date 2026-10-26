@@ -8,7 +8,7 @@
 #include "sensors/thermocouples.h"
 
 enum class LocalUiMode : uint8_t {
-  START_MENU, NORMAL, TC_VIEW, HEATFLUX_VIEW, SSR_TEST, SSR_TEST_BLOCKED,
+  START_MENU, NORMAL, HEATFLUX_VIEW, SSR_TEST, SSR_TEST_BLOCKED,
   AUTOTUNE_SETPOINT, AUTOTUNE_CONFIRM, AUTOTUNE_RUNNING, AUTOTUNE_RESULT,
   AUTOTUNE_BLOCKED, SETPOINT_BLOCKED, PID_HEATER_MENU, PID_MANUAL_SELECT, PID_MANUAL_EDIT,
   PID_MANUAL_SAVE_CONFIRM
@@ -28,6 +28,7 @@ class Display {
               uint8_t menuSelection, float autotuneTargetC,
               uint8_t pidHeaterSelection, uint8_t pidManualSelection,
               float manualKp, float manualKi, float manualKd,
+              bool dashboardSetpointEditActive, float dashboardEditSetpointC,
               bool heatFluxShowWm2, float heatFluxKwM2,
               const Thermocouples &thermocouples, const HeatFluxSensor &heatFlux);
 

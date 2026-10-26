@@ -99,16 +99,30 @@ und der Nutzer den Upload ausdrücklich beauftragen.
   Steuerungsarchitektur zu umgehen.
 - Der lokale Bedienfluss startet nach dem Splash auf dem Dashboard. Außerhalb
   von `PROFILE` und `AUTOTUNE` öffnet Longpress das lokale Menü mit
-  `SETPOINT`, `THERMOCOUPLES`, `HEATFLUX`, `PID HEATER` und `SSR TEST`.
-  Drehen wählt, kurzer Tastendruck öffnet den markierten Eintrag. In `HEATFLUX` dreht
+  `SETPOINT`, `HEATFLUX`, `PID HEATER` und `SSR TEST`.
+  Dashboard-Drehen wechselt zwischen Hauptseite und Thermoelement-Messwerten.
+  Im Menü dreht die
+  Auswahl, kurzer Tastendruck öffnet den markierten Eintrag. In `HEATFLUX` dreht
   der Encoder zwischen Rohspannung `RAW` in mV und kalibriertem `W/m2` um.
+  Longpress geht in Untermenüs jeweils eine Ebene zurück; am Hauptmenü führt
+  er zum Dashboard.
 - `SETPOINT` führt zuerst zur Sollwertwahl und danach zur Bestätigung
   `HEATER ON? YES/NO`. Nur `YES` startet den Temperaturregelkreis und wechselt
   zum Dashboard mit `RUN`. `NO` sowie Longpress im Dialog setzen Sollwert und
-  Ausgang auf 0/AUS und kehren ins Hauptmenü zurück. Longpress im Dashboard
-  bei laufendem `SETPOINT`-Regelkreis stoppt diesen, setzt den Sollwert auf 0
-  und bleibt auf dem Dashboard; `RUN` verschwindet. Longpress im Hauptmenü
-  kehrt zum Dashboard zurück. Der Autotune-Sollwert ist davon unabhängig.
+  Ausgang auf 0/AUS und kehren ins Hauptmenü zurück. Kurzdruck im laufenden
+  `SETPOINT`-Dashboard startet die vorläufige SP-Bearbeitung (`SP:` blinkt);
+  Drehen ändert den Vorschauwert mit 1-/10-°C-Schritten und Kurzdruck übernimmt
+  ihn sofort. Der normale Sollwert wird nicht persistent gespeichert und
+  startet nach jedem Neustart auf 0. Longpress in der Vorschau verwirft
+  den Entwurf und lässt den Regelkreis unverändert weiterlaufen. Longpress im
+  Dashboard außerhalb der Vorschau stoppt den Regelkreis, setzt SP auf 0 und
+  bleibt auf dem Dashboard; ein weiterer Longpress öffnet das Hauptmenü.
+  Longpress im Hauptmenü kehrt zum Dashboard zurück.
+  Die zweite Dashboard-Seite zeigt die aktuellen Werte aller drei Kanäle,
+  auch `OUTLIER`; MAX31855-Fehler, fehlende Werte und Übertemperatur erscheinen
+  im betroffenen Vier-Zeichen-Feld als `FAIL`. Bei globalem `FAULT` bleibt die
+  zweite Seite sichtbar, während die Hauptseite `FLT` anzeigt.
+  Der Autotune-Sollwert ist davon unabhängig.
 - Jede Änderung an Display-, Encoder- oder Menüverhalten muss im selben
   Arbeitsgang im README-Abschnitt „Lokale Bedienung“ dokumentiert werden.
   Dazu gehören Menüeinträge, Navigation, Ein-/Ausstieg sowie angezeigte
@@ -125,8 +139,9 @@ und der Nutzer den Upload ausdrücklich beauftragen.
 - Das lokale Menue fuehrt zusaetzlich `SSR TEST`. Der Test ist nur bei Modus
   `OFF`, mindestens einem gueltigen Thermoelement und ohne `FAULT` zulaessig.
   Er schaltet den SSR dreimal 500 ms EIN, jeweils mit 500 ms AUS dazwischen,
-  und endet sicher AUS. Kurzer oder langer Tastendruck bricht ab; die README
-  dokumentiert Menuefuehrung, Freigabe und Anzeige.
+  und endet sicher AUS. Kurzdruck bricht ab und führt zum Dashboard;
+  Longpress bricht ab und führt zum Hauptmenü. Automatisches Ende führt zum
+  Hauptmenü. Die README dokumentiert Menuefuehrung, Freigabe und Anzeige.
 - Die Detailinformationen des Autotunings bleiben auf der seriellen
   Schnittstelle. Das 1602 muss während `AUTOTUNE` weder Zyklusfortschritt noch
   berechnete PID-Werte anzeigen. `EVENT,AUTOTUNE=SUCCESS,KP=...,KI=...,KD=...`

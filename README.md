@@ -65,14 +65,26 @@ Der Serial-Parser verarbeitet höchstens 64 Zeichen pro Schleifendurchlauf. Ausg
 
 ## Thermoelement-Redundanz
 
-Jeder Kanal verwaltet Temperatur, MAX31855-Fehlerbits, Fehler- und Recovery-Zähler, elektrische Gültigkeit, Plausibilität und einen der Zustände `OK`, `FAULT`, `OUTLIER` oder `RECOVERING`.
+Jeder Kanal verwaltet den zuletzt gelesenen Temperaturwert, MAX31855-Fehlerbits, Fehler- und Recovery-Zähler, elektrische Gültigkeit und Plausibilität. Ein plausibler Messwert ist nicht automatisch elektrisch fehlerfrei: Die Plausibilitätsprüfung vergleicht die gültigen Sensoren miteinander und kann einen elektrisch einwandfreien, aber stark abweichenden Kanal als `OUTLIER` verwerfen.
 
-- Ein Kanal wird nach drei aufeinanderfolgenden elektrischen Fehlern gesperrt.
-- Nach fünf aufeinanderfolgenden guten Messungen wird er wieder freigegeben.
-- Kurzzeitige Fehler werden angezeigt; der letzte qualifizierte Wert darf maximal zwei Messzyklen überbrücken.
-- Bei drei Sensoren wird ein einzelner abweichender Sensor gegenüber einem nah beieinanderliegenden Paar als Ausreißer verworfen.
-- Sind nur zwei Sensoren verfügbar und weichen diese um mehr als `TC_MAX_DEVIATION_C` (30 K) voneinander ab, ist keine sichere Zuordnung möglich: beide werden verworfen und der Heizer geht aus.
-- Bei einer mehrdeutigen Dreierverteilung wird ausschließlich der Median verwendet.
+### Elektrische Gültigkeit
+
+- Ein MAX31855-Kanal gilt bei einem nicht endlichen Messwert oder gesetzten Fehlerbit (offenes Thermoelement oder Kurzschluss) als fehlerhaft.
+- Drei aufeinanderfolgende fehlerhafte Messungen sperren den Kanal (`FAULT`). Ein Fehler wird sofort in den Fehlerstatus aufgenommen; vor der Sperrung bleibt der Kanal im Zustand `RECOVERING`.
+- Nach einem Fehler sind fünf aufeinanderfolgende gute Messungen nötig, bevor der Kanal wieder elektrisch gültig ist. Ein weiterer Fehler setzt den Recovery-Zähler zurück.
+- Elektrisch ungültige Kanäle gehen nicht in die Regeltemperatur ein. Ihr letzter Rohwert kann weiterhin in der seriellen Telemetrie erscheinen. Die zweite Dashboard-Seite zeigt dagegen die aktuellen Kanalwerte unabhängig von elektrischer Freigabe und Plausibilität; bei einem MAX31855-Fehler, fehlendem Messwert oder Übertemperatur erscheint `FAIL` im jeweiligen Vier-Zeichen-Feld.
+
+### Temperaturvergleich und Ausreißer
+
+Die Differenzschwelle `TC_MAX_DEVIATION_C` beträgt derzeit **60 °C**. Für die Entscheidung werden nur elektrisch gültige Kanäle betrachtet:
+
+- **Ein gültiger Sensor:** Sein Wert wird als Regeltemperatur verwendet. Der Systemstatus ist `DEGRADED`; die Heizleistung ist auf `MAX_OUTPUT_SINGLE_TC_PERCENT` begrenzt.
+- **Zwei gültige Sensoren:** Bei höchstens 60 °C Differenz werden beide verwendet und gemittelt. Bei mehr als 60 °C Differenz lässt sich nicht entscheiden, welcher Wert falsch ist: beide werden verworfen und der Heizer wird abgeschaltet (`FAULT`).
+- **Drei gültige Sensoren:** Liegen alle drei innerhalb einer Gesamtspanne von höchstens 60 °C, werden alle verwendet und gemittelt. Liegt ein Sensor mehr als 60 °C vom benachbarten Messwert entfernt, während die beiden anderen höchstens 60 °C auseinanderliegen, wird der abweichende Sensor als `OUTLIER` verworfen; die beiden übrigen werden gemittelt.
+- **Mehrdeutige Dreierverteilung:** Wenn keine eindeutige nahe Zweiergruppe vorliegt, werden alle drei verworfen. Wenn beide benachbarten Differenzen höchstens 60 °C betragen, aber die Gesamtspanne über 60 °C liegt, wird nur der Median verwendet; die beiden äußeren Werte gelten als Ausreißer.
+- **Keine plausible Messung:** Die Regeltemperatur ist ungültig, der Status wird `FAULT` und der SSR wird sofort ausgeschaltet.
+
+Beispiel: Bei `22 °C`, `25 °C` und `400 °C` bilden die ersten beiden Werte ein nahes Paar. Der dritte Kanal wird als `OUTLIER` von Regeltemperatur und Mittelwert ausgeschlossen, bleibt aber auf der zweiten Dashboard-Seite sichtbar. Die Konsole meldet beispielsweise `T3=400.0` und `T3S=OUTLIER`; die zweite Seite zeigt weiterhin den aktuellen Wert `400`. Sobald sich die Werte wieder innerhalb der Plausibilitätsregeln befinden, wird der Kanal automatisch erneut für die Regelung berücksichtigt.
 
 Regeltemperatur und Systemreaktion:
 
@@ -119,10 +131,13 @@ Der RP2350-Hardware-Watchdog läuft mit 2 s Timeout. Er wird nur gefüttert, wen
 
 Der PID arbeitet mit fester 100-ms-Abtastzeit und einem Ausgang von 0 bis 100 %. Er verwendet Ableitung auf dem Messwert, bedingte Integration gegen Windup und eine initialisierte Integralkomponente für möglichst stoßarme Moduswechsel. Der zentrale Sollwert wird über `SETPOINT` oder seriell mit `SET,SP=...` geändert; während `PROFILE` gehört er ausschließlich dem Profilgenerator.
 
-Der lokale Menüpunkt `PID HEATER` bietet `AUTOTUNE` und `MANUAL`. `MANUAL` lädt die aktuell aktiven PID-Werte. Drehen wählt Kp, Ki, Kd oder SAVE; kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Rastungsabständen bis 120 ms gelten Schritte von 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf SAVE öffnet `SAVE PID VALUES` mit `YES`/`NO`. Beide Optionen übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; YES veranlasst die verzögerte EEPROM-Speicherung, NO behält die Werte nur bis zum Neustart. Langer Druck führt aus der Kp/Ki/Kd/SAVE-Auswahl und aus der Speicherabfrage ins Hauptmenü; langer Druck im Hauptmenü führt zurück zur Statusseite. Ohne gespeicherte Werte gelten Kp=2,0, Ki=0,10 und Kd=5,0.
+Der lokale Menüpunkt `PID HEATER` bietet `AUTOTUNE` und `MANUAL`. `MANUAL` lädt die aktuell aktiven PID-Werte. Drehen wählt Kp, Ki, Kd oder SAVE; kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Rastungsabständen bis 120 ms gelten Schritte von 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf SAVE öffnet `SAVE PID VALUES` mit `YES`/`NO`. Beide Optionen übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; YES veranlasst die verzögerte EEPROM-Speicherung, NO behält die Werte nur bis zum Neustart. Longpress in Kp/Ki/Kd-Bearbeitung geht zur Parameterauswahl zurück; Longpress dort zur `PID HEATER`-Auswahl. Longpress in der Speicherabfrage geht zurück zu `SAVE`, ohne die Änderungen zu übernehmen. Longpress im Hauptmenü führt zurück zum Dashboard. Ohne gespeicherte Werte gelten Kp=2,0, Ki=0,10 und Kd=5,0.
 
 `AUTOTUNE` kann lokal oder seriell gestartet werden. Der lokale Autotune-Sollwert wird beim ersten Aufruf aus `SETPOINT` vorbelegt (bei SP=0 mit dem Standardwert 25 °C), danach bis zum Neustart separat gehalten und nicht persistent gespeichert. Das Relay-Verfahren erzeugt kontrollierte Schwingungen um diesen Sollwert, misst Periodendauer und Amplitude über fünf Zyklen und berechnet konservative, Tyreus-Luyben-artige Parameter. Mindestens zwei gültige Thermoelemente sind erforderlich. Sensorverlust unter zwei Kanälen, Übertemperatur, Timeout, `FAULT` oder `AUTOTUNE,STOP` brechen ab. Bei Erfolg werden die neuen Werte unmittelbar übernommen und zur verzögerten Speicherung vorgemerkt; anschließend meldet die Firmware `EVENT,AUTOTUNE=SUCCESS,KP=...,KI=...,KD=...`. Das Event bestätigt die Übernahme, die Detailwerte bleiben seriell. Der lokale Bildschirm zeigt Status und Ergebnis, aber keine Zyklen oder PID-Werte. Autotune ersetzt keine Leistungs- und Temperaturbegrenzung.
 ## Lokale Bedienung
+
+Der vollständige lokale Menübaum mit Kurzbeschreibungen und Ausstiegen steht
+in [Menübaum.md](Menübaum.md).
 
 - Der Splashscreen zeigt zunächst zwei Sekunden lang nur `CONE HEATER`, dann
   nacheinander den ADS1220 und die drei MAX31855-
@@ -136,30 +151,42 @@ Der lokale Menüpunkt `PID HEATER` bietet `AUTOTUNE` und `MANUAL`. `MANUAL` läd
 - Menü, SETPOINT-Dialog und PID-HEATER-Einstellungen werden alle 100 ms aktualisiert; Status- und
   Messwertansichten werden alle 500 ms aktualisiert. Das betrifft die
   LCD-Anzeige, nicht die davon unabhängigen Sensor-Polling-Intervalle.
-- Die Statusseite erscheint direkt nach dem Start. Kurzer Tastendruck wechselt
-  zwischen den beiden Statusseiten. Langer Tastendruck öffnet außerhalb von
-  `PROFILE` und `AUTOTUNE` das lokale Menü.
-- Das Menü enthält `SETPOINT`, `THERMOCOUPLES`, `HEATFLUX`, `PID HEATER` und `SSR TEST`. Drehen wählt zyklisch; kurzer Druck öffnet den Eintrag. Langer Druck kehrt aus dem Hauptmenü zum Dashboard zurück.
-- `PID HEATER` zeigt `AUTOTUNE` und `MANUAL`. In `AUTOTUNE` wird der Sollwert beim ersten Aufruf aus `SETPOINT` übernommen und danach bis zum Neustart unabhängig gehalten. Langsames Drehen ändert ihn in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck öffnet die Startabfrage `YES`/`CANCEL`; Drehen wählt, kurzer Druck bestätigt. Der Start erfordert mindestens zwei gültige Thermoelemente und keinen `FAULT`; andernfalls erscheint `2+ TC REQUIRED`. Im Lauf zeigt das Display `AUTOTUNE`/`PRESS=STOP`; kurzer oder langer Tastendruck stoppt. Erfolg, Fehler oder Stopp werden angezeigt; Zyklen und PID-Werte bleiben seriell.
-- In `MANUAL` werden die aktuell aktiven Werte geladen. Drehen wählt zyklisch `Kp`, `Ki`, `Kd` und `SAVE`. Kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Abständen bis 120 ms sind es 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf `SAVE` öffnet `YES`/`NO`; Drehen wählt, kurzer Druck bestätigt. Beide Antworten übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; `YES` speichert sie verzögert persistent, `NO` übernimmt sie nur bis zum Neustart. Langer Druck führt aus der Kp/Ki/Kd/SAVE-Auswahl oder dem Dialog ins Hauptmenü. Langer Druck im Hauptmenü kehrt zur Statusseite zurück.
+- Die Statusseite erscheint direkt nach dem Start. Drehen wechselt zwischen
+  den beiden Statusseiten, im Leerlauf wie bei laufendem `SETPOINT`. Longpress
+  öffnet außerhalb von `PROFILE` und `AUTOTUNE` das lokale Menü.
+- Das Menü enthält `SETPOINT`, `HEATFLUX`, `PID HEATER` und `SSR TEST`. Drehen wählt zyklisch; kurzer Druck öffnet den Eintrag. Langer Druck kehrt aus dem Hauptmenü zum Dashboard zurück.
+- `PID HEATER` zeigt `AUTOTUNE` und `MANUAL`. Longpress in dieser Auswahl führt ins Hauptmenü zurück. In `AUTOTUNE` wird der Sollwert beim ersten Aufruf aus `SETPOINT` übernommen und danach bis zum Neustart unabhängig gehalten. Langsames Drehen ändert ihn in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck öffnet die Startabfrage `YES`/`CANCEL`; Drehen wählt, kurzer Druck bestätigt. Longpress im Zielwert führt zurück zu `PID HEATER`, Longpress in der Abfrage zurück zum Zielwert; `CANCEL` führt zurück zu `PID HEATER`. Der Start erfordert mindestens zwei gültige Thermoelemente und keinen `FAULT`; andernfalls erscheint `2+ TC REQUIRED`. Im Lauf zeigt das Display `AUTOTUNE`/`PRESS=STOP`; kurzer oder langer Tastendruck stoppt. Erfolg, Fehler oder Stopp werden angezeigt; kurzer Druck führt zum Dashboard, Longpress zurück zu `PID HEATER`. Zyklen und PID-Werte bleiben seriell.
+- In `MANUAL` werden die aktuell aktiven Werte geladen. Drehen wählt zyklisch `Kp`, `Ki`, `Kd` und `SAVE`. Kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Abständen bis 120 ms sind es 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf `SAVE` öffnet `YES`/`NO`; Drehen wählt, kurzer Druck bestätigt. Beide Antworten übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; `YES` speichert sie verzögert persistent, `NO` übernimmt sie nur bis zum Neustart. Longpress in Kp/Ki/Kd-Bearbeitung geht zur Parameterauswahl zurück; Longpress dort zur `PID HEATER`-Auswahl. Longpress in der Speicherabfrage geht zurück zu `SAVE`, ohne Änderungen zu übernehmen. Longpress im Hauptmenü kehrt zum Dashboard zurück.
 - `SSR TEST` ist nur bei Betriebsmodus `OFF`, mindestens einem gültigen
   Thermoelement und ohne `FAULT` verfügbar. Der Test schaltet den SSR dreimal
   je 500 ms ein, mit jeweils 500 ms AUS zwischen den Pulsen, und endet AUS.
-  Während des Tests zeigt das LCD `SSR TEST` und `3x500ms ON/OFF`; kurzer oder
-  langer Tastendruck bricht den Test ab. Bei fehlender Freigabe erscheint
-  `OFF + TC OK`; kurzer oder langer Tastendruck kehrt zurück. Der Test
+  Während des Tests zeigt das LCD `SSR TEST` und `3x500ms ON/OFF`; Kurzdruck
+  bricht den Test ab und kehrt zum Dashboard zurück, Longpress bricht ab und
+  kehrt ins Hauptmenü zurück. Nach automatischem Ende geht es ebenfalls ins
+  Hauptmenü. Bei fehlender Freigabe erscheint `OFF + TC OK`; Kurzdruck kehrt
+  zum Dashboard zurück, Longpress ins Hauptmenü. Der Test
   schaltet eine angeschlossene Last tatsächlich ein.
-- `THERMOCOUPLES` zeigt die drei plausibilisierten Thermoelementwerte; nicht
-  verfügbare Kanäle erscheinen als `--`. `HEATFLUX` startet in `RAW` und zeigt
+- Die zweite Statusseite zeigt stets die aktuellen Messwerte aller drei Kanäle
+  in der Form `TC1:  TC2:  TC3:` mit den Werten darunter. Jedes Wertefeld
+  belegt vier Zeichen, mit zwei Leerzeichen Abstand zum nächsten Feld. Sie zeigt auch Werte
+  von `OUTLIER`-Kanälen, selbst wenn diese nicht in die Regeltemperatur eingehen.
+  Bei MAX31855-Fehler, fehlendem Messwert oder Übertemperatur erscheint `FAIL`
+  nur im Feld des betroffenen Kanals. Auch bei globalem Systemstatus `FAULT`
+  bleibt die Anzeige aktiv: Die Hauptseite zeigt `FLT`, die zweite Seite zeigt
+  weiterhin die drei Kanäle. Einfaches
+  Drehen wechselt zurück zur ersten Statusseite. `HEATFLUX` startet in `RAW` und zeigt
   die Rohspannung in mV. Drehen wechselt zwischen `RAW` und `W/m2`; der
   gewählte Modus steht in der Überschrift. `W/m2` wird aus dem kalibrierten
   Engineering-Wert berechnet. Ohne gültige Kalibrierung erscheint dort
   `UNCALIBRATED`. Bei deaktiviertem Backend, Sensorfehler oder ungültiger
-  Messung wird der entsprechende Sensorstatus angezeigt. Kurzer oder langer
-  Tastendruck schließt die Ansichten und kehrt zur Statusseite zurück.
-- `SETPOINT` öffnet zuerst die Sollwertwahl. Langsames Drehen ändert den Wert in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck führt zur Abfrage `HEATER ON?` mit `YES`/`NO`. `YES` startet bei gültiger Temperatur und ohne `FAULT` den Regelkreis und zeigt im Dashboard `RUN`; der Sollwert wird verzögert gespeichert. `NO` setzt den Sollwert auf 0, schaltet den Heizer aus und kehrt ins Hauptmenü zurück. Langer Druck während Auswahl oder Abfrage bricht ab, setzt den Sollwert auf 0 und kehrt ins Hauptmenü zurück. Langer Druck im laufenden Dashboard-Regelkreis stoppt den Heizer, setzt den Sollwert auf 0 und bleibt auf dem Dashboard; `RUN` verschwindet.
-- Der bestätigte Sollwert wird verzögert gespeichert. PID-Parameter können lokal unter `PID HEATER` oder seriell geändert werden; Autotune-Details bleiben seriell.
-- Kurzer Tastendruck auf der normalen Statusseite wechselt die LCD-Statusseite.
+  Messung wird der entsprechende Sensorstatus angezeigt. Kurzdruck schließt
+  die Ansicht und kehrt zum Dashboard zurück; Longpress schließt sie und kehrt
+  ins Hauptmenü zurück.
+- `SETPOINT` öffnet zuerst die Sollwertwahl. Langsames Drehen ändert den Wert in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck führt zur Abfrage `HEATER ON?` mit `YES`/`NO`. `YES` startet bei gültiger Temperatur und ohne `FAULT` den Regelkreis und zeigt im Dashboard `RUN`. `NO` setzt den Sollwert auf 0, schaltet den Heizer aus und kehrt ins Hauptmenü zurück. Langer Druck während Auswahl oder Abfrage bricht ab, setzt den Sollwert auf 0 und kehrt ins Hauptmenü zurück.
+- Bei laufendem `SETPOINT` öffnet Kurzdruck im Dashboard die SP-Bearbeitung. `SP:` blinkt abwechselnd mit `__:` an derselben Position; Drehen ändert den angezeigten Wert vorläufig mit denselben langsamen 1-°C- und schnellen 10-°C-Schritten. Der nächste Kurzdruck übernimmt den Wert sofort in den Regler. Longpress in der Vorschau verwirft den Entwurf und setzt den bisherigen Regelkreis fort. Longpress im Dashboard außerhalb der Vorschau stoppt den Regelkreis, setzt SP auf 0 und bleibt auf dem Dashboard; ein weiterer Longpress öffnet das Hauptmenü.
+- Der normale Sollwert startet nach jedem Neustart auf 0 und wird nicht persistent gespeichert. PID-Parameter können lokal unter `PID HEATER` oder seriell geändert werden; Autotune-Details bleiben seriell.
+- Während der vorläufigen SP-Bearbeitung wechselt Drehen nicht die Statusseite;
+  der Kurzdruck übernimmt den angezeigten Sollwert.
 
 Profile werden nicht lokal editiert.
 
@@ -197,31 +224,39 @@ Lokaler Grundzustand (`OFF`):
 
 ```text
 T:123.4 LOC
-SP:500 O:  0 OK
+SP:500 P:  0 OK
 ```
 
 PC hat die UI übernommen (`UI,CONNECT`):
 
 ```text
 T:123.4 PC
-SP:500 O: 42 OK
+SP:500 P: 42 OK
 ```
 
 Die Firmware springt beim Verbinden automatisch auf diese Hauptseite. Der
 Encoder verändert dann weder Sollwert noch LCD-Seite.
 
-Zweite Statusseite, beispielsweise im PID-Betrieb:
+Zweite Statusseite mit den aktuellen Messwerten:
 
 ```text
-MODE:SETPOINT
-TC:3 ERR:0000
+TC1:  TC2:  TC3:
+ 123   125   400
+```
+
+Bei einem Übertemperatur- oder Sensorfehler wird nur der betroffene Kanal als
+`FAIL` markiert; die anderen Messwerte bleiben sichtbar:
+
+```text
+TC1:  TC2:  TC3:
+ 123  FAIL   400
 ```
 
 Menü nach Longpress (Auswahl `SETPOINT`; der nächste Eintrag steht darunter):
 
 ```text
 >SETPOINT
- THERMOCOUPLES
+ HEATFLUX
 ```
 
 Menüeintrag `SSR TEST` und laufende Impulsfolge:
@@ -275,7 +310,15 @@ Dashboard während des laufenden Regelkreises:
 
 ```text
 T:123.4 LOC RUN
-SP:500 O: 42 OK
+SP:500 P: 42 OK
+```
+
+Vorläufige SP-Änderung nach Kurzdruck bei laufendem SETPOINT-Regelkreis
+(`SP:` blinkt; der gezeigte Wert ist noch nicht übernommen):
+
+```text
+T:123.4 LOC RUN
+SP:510 P: 42 OK
 ```
 
 Menüauswahl `PID HEATER`:
@@ -361,30 +404,38 @@ und berechnete PID-Werte kommen über Serial:
 
 ```text
 T:500.0 PC
-SP:500 O: 65 OK
+SP:500 P: 65 OK
 ```
 
-Auf der zweiten Seite ist der Modus sichtbar:
+Die zweite Dashboard-Seite zeigt die drei aktuellen Thermoelementwerte:
 
 ```text
-MODE:AUTOTUNE
-TC:3 ERR:0000
+TC1:  TC2:  TC3:
+ 123   125   400
 ```
 
 Bei reduzierter Sensorqualität wird der Status als `DEG` ausgegeben:
 
 ```text
 T:499.2 LOC
-SP:500 O: 25 DEG
+SP:500 P: 25 DEG
 ```
 
-Auf der normalen Statusseite haben Sicherheitsfehler Vorrang vor
-Betriebsanzeigen. Die Diagnoseansichten `THERMOCOUPLES` und `HEATFLUX` bleiben
-für die Fehlersuche aufrufbar:
+Bei globalem Systemstatus `FAULT` läuft die Dashboard-Aktualisierung weiter.
+Die Hauptseite zeigt `FLT`, die zweite Seite markiert fehlerhafte Kanäle einzeln;
+Fehlerdetails bleiben seriell verfügbar. Bei Übertemperatur sieht die Anzeige
+zum Beispiel so aus:
 
 ```text
-FAULT 00002000
-OVERTEMPERATURE
+T:800.1 LOC
+SP:500 P:  0 FLT
+```
+
+Auf der zweiten Seite wird der betroffene Kanal markiert:
+
+```text
+TC1:  TC2:  TC3:
+ 123  FAIL   400
 ```
 
 ## Temperaturprofile
@@ -501,7 +552,7 @@ Der Kalibrierwert kann nach dem Booten seriell gesetzt werden. `SET,HF_SENS=...`
 
 ## Persistente Einstellungen
 
-Kp, Ki, Kd und der letzte normale Sollwert werden über die EEPROM-Emulation des Arduino-Pico-Core gespeichert. Eine Prüfsumme schützt gegen ungültige Daten. Eine nicht gesetzte Wärmestromkalibrierung (`NAN`) macht die übrigen gespeicherten Einstellungen nicht ungültig. Flash wird nicht bei jeder Encoder-Rastung beschrieben, sondern erst fünf Sekunden nach der letzten Änderung. Sollwerte aus Profil oder Autotune überschreiben den gespeicherten normalen Sollwert nicht.
+Kp, Ki, Kd und Wärmestromkalibrierung werden über die EEPROM-Emulation des Arduino-Pico-Core gespeichert. Der normale Sollwert ist bewusst nicht persistent und startet nach jedem Neustart auf 0. Eine Prüfsumme schützt gegen ungültige Daten. Eine nicht gesetzte Wärmestromkalibrierung (`NAN`) macht die übrigen gespeicherten Einstellungen nicht ungültig. Flash wird nicht bei jeder Encoder-Rastung beschrieben, sondern erst fünf Sekunden nach der letzten Änderung. Sollwerte aus Profil oder Autotune überschreiben keinen gespeicherten normalen Sollwert.
 
 ## Build, Upload und Testgrenzen
 

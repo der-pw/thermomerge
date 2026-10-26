@@ -115,6 +115,7 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                      uint8_t menuSelection, float autotuneTargetC,
                      uint8_t pidHeaterSelection, uint8_t pidManualSelection,
                      float manualKp, float manualKi, float manualKd,
+                     bool dashboardSetpointEditActive, float dashboardEditSetpointC,
                      bool heatFluxShowWm2,
                      float heatFluxKwM2,
                      const Thermocouples &thermocouples,
@@ -166,7 +167,7 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                  ? "OVERTEMPERATURE" : "TC SENSOR ERROR");
   } else if (uiMode == LocalUiMode::START_MENU) {
     static const char *const items[] = {
-        "SETPOINT", "THERMOCOUPLES", "HEATFLUX", "PID HEATER", "SSR TEST"};
+        "SETPOINT", "HEATFLUX", "PID HEATER", "SSR TEST"};
     const uint8_t count = sizeof(items) / sizeof(items[0]);
     snprintf(line1, sizeof(line1), ">%-.15s", items[menuSelection % count]);
     snprintf(line2, sizeof(line2), " %-15s", items[(menuSelection + 1) % count]);
@@ -223,18 +224,6 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
   } else if (uiMode == LocalUiMode::SETPOINT_BLOCKED) {
     snprintf(line1, sizeof(line1), "HEATER BLOCKED");
     snprintf(line2, sizeof(line2), "CHECK TC/FAULT");
-  } else if (uiMode == LocalUiMode::TC_VIEW) {
-    const ThermocoupleChannel &tc1 = thermocouples.channel(0);
-    const ThermocoupleChannel &tc2 = thermocouples.channel(1);
-    const ThermocoupleChannel &tc3 = thermocouples.channel(2);
-    formatFloat(temperature, sizeof(temperature),
-                tc1.electricallyValid && tc1.plausible ? tc1.temperatureC : NAN, 5, 1);
-    formatFloat(value, sizeof(value),
-                tc2.electricallyValid && tc2.plausible ? tc2.temperatureC : NAN, 5, 1);
-    snprintf(line1, sizeof(line1), "1:%s 2:%s", temperature, value);
-    formatFloat(temperature, sizeof(temperature),
-                tc3.electricallyValid && tc3.plausible ? tc3.temperatureC : NAN, 5, 1);
-    snprintf(line2, sizeof(line2), "3:%s N:%u", temperature, state.validTcCount);
   } else if (uiMode == LocalUiMode::HEATFLUX_VIEW) {
     snprintf(line1, sizeof(line1), "HEATFLUX %s", heatFluxShowWm2 ? "W/m2" : "RAW");
     if (!heatFlux.enabled()) snprintf(line2, sizeof(line2), "DISABLED");
@@ -260,9 +249,6 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
       snprintf(line1, sizeof(line1), "SETPOINT:%s C", setpoint);
       snprintf(line2, sizeof(line2), "TURN PRESS=NEXT");
     }
-  } else if (state.status == SystemStatus::FAULT) {
-    snprintf(line1, sizeof(line1), "FAULT %08lX", static_cast<unsigned long>(state.errors));
-    snprintf(line2, sizeof(line2), "%s", (state.errors & ERROR_OVERTEMP) ? "OVERTEMPERATURE" : "TC SENSOR ERROR");
   } else if (state.mode == OperatingMode::PROFILE && profile.currentStep()) {
     const ProfileStep *step = profile.currentStep();
     formatFloat(temperature, sizeof(temperature), state.controlTemperatureC, 5, 1);
@@ -278,17 +264,38 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                static_cast<unsigned long>(profile.remainingSeconds(nowMs) % 60));
   } else if (page_ == 0) {
     formatFloat(temperature, sizeof(temperature), state.controlTemperatureC, 5, 1);
-    formatFloat(setpoint, sizeof(setpoint), state.setpointC, 3, 0);
+    formatFloat(setpoint, sizeof(setpoint), dashboardSetpointEditActive
+                    ? dashboardEditSetpointC : state.setpointC, 3, 0);
     formatFloat(output, sizeof(output), state.outputPercent, 3, 0);
     snprintf(line1, sizeof(line1), state.mode == OperatingMode::SETPOINT
                  ? "T:%s %s RUN" : "T:%s %s", temperature,
              state.serialUiConnected ? "PC" : "LOC");
-    snprintf(line2, sizeof(line2), "SP:%s O:%s %s", setpoint, output,
-             state.status == SystemStatus::DEGRADED ? "DEG" : "OK");
+    const bool showSetpointLabel = !dashboardSetpointEditActive ||
+                                   ((nowMs / 350U) % 2U == 0U);
+    const char *systemStatus = state.status == SystemStatus::FAULT ? "FLT" :
+        state.status == SystemStatus::DEGRADED ? "DEG" : "OK";
+    snprintf(line2, sizeof(line2), showSetpointLabel ? "SP:%s P:%s %s"
+                                                    : "__:%s P:%s %s",
+             setpoint, output, systemStatus);
   } else {
-    snprintf(line1, sizeof(line1), "MODE:%s", modeName(state.mode));
-    snprintf(line2, sizeof(line2), "TC:%u ERR:%04lX", state.validTcCount,
-             static_cast<unsigned long>(state.errors & 0xFFFF));
+    const ThermocoupleChannel &tc1 = thermocouples.channel(0);
+    const ThermocoupleChannel &tc2 = thermocouples.channel(1);
+    const ThermocoupleChannel &tc3 = thermocouples.channel(2);
+    const bool tc1Fault = tc1.faultFlags != 0 || !isfinite(tc1.temperatureC) ||
+        tc1.temperatureC >= config::MAX_TEMPERATURE_C;
+    const bool tc2Fault = tc2.faultFlags != 0 || !isfinite(tc2.temperatureC) ||
+        tc2.temperatureC >= config::MAX_TEMPERATURE_C;
+    const bool tc3Fault = tc3.faultFlags != 0 || !isfinite(tc3.temperatureC) ||
+        tc3.temperatureC >= config::MAX_TEMPERATURE_C;
+    if (tc1Fault) snprintf(temperature, sizeof(temperature), "FAIL");
+    else formatFloat(temperature, sizeof(temperature), tc1.temperatureC, 4, 0);
+    if (tc2Fault) snprintf(value, sizeof(value), "FAIL");
+    else formatFloat(value, sizeof(value), tc2.temperatureC, 4, 0);
+    snprintf(line1, sizeof(line1), "TC1:  TC2:  TC3:");
+    if (tc3Fault) snprintf(setpoint, sizeof(setpoint), "FAIL");
+    else formatFloat(setpoint, sizeof(setpoint), tc3.temperatureC, 4, 0);
+    snprintf(line2, sizeof(line2), "%4s  %4s  %4s", temperature, value,
+             setpoint);
   }
   writeLine(0, line1);
   writeLine(1, line2);

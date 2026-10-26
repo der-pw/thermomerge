@@ -61,7 +61,7 @@ constexpr uint32_t TASK_HEALTH_TIMEOUT_MS = 750;
 
 constexpr uint8_t TC_FAULT_TRIP_COUNT = 3;
 constexpr uint8_t TC_RECOVERY_COUNT = 5;
-constexpr float TC_MAX_DEVIATION_C = 30.0f;
+constexpr float TC_MAX_DEVIATION_C = 60.0f;
 constexpr float MAX_OUTPUT_SINGLE_TC_PERCENT = 25.0f;
 constexpr float MAX_TEMPERATURE_C = 800.0f;
 constexpr float MIN_SETPOINT_C = 0.0f;

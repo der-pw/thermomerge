@@ -76,6 +76,17 @@ void stopActiveProcesses() {
   }
 }
 
+bool overtemperatureClearanceReady() {
+  if (systemState.validTcCount == 0) return false;
+  for (uint8_t i = 0; i < 3; ++i) {
+    const ThermocoupleChannel &channel = thermocouples.channel(i);
+    if (channel.faultFlags == 0 && isfinite(channel.temperatureC) &&
+        channel.temperatureC >= config::MAX_TEMPERATURE_C - 20.0f)
+      return false;
+  }
+  return true;
+}
+
 void updateSystemFromSensors(const ThermocoupleResult &result) {
   systemState.controlTemperatureC = result.controlTemperatureC;
   systemState.validTcCount = result.validCount;
@@ -151,8 +162,8 @@ void updateEncoder(uint32_t nowMs) {
   if (localUiMode == LocalUiMode::START_MENU) {
     if (events.detents != 0) {
       int16_t selection = static_cast<int16_t>(menuSelection) + events.detents;
-      selection %= 4;
-      if (selection < 0) selection += 4;
+      selection %= 5;
+      if (selection < 0) selection += 5;
       menuSelection = static_cast<uint8_t>(selection);
     }
     if (events.shortPress) {
@@ -177,14 +188,38 @@ void updateEncoder(uint32_t nowMs) {
       } else if (menuSelection == 2) {
         pidHeaterSelection = 0;
         localUiMode = LocalUiMode::PID_HEATER_MENU;
-      } else {
+      } else if (menuSelection == 3) {
         const bool testPermitted = systemState.mode == OperatingMode::OFF &&
             systemState.status != SystemStatus::FAULT && systemState.temperatureReady;
         localUiMode = heater.startTest(nowMs, testPermitted)
             ? LocalUiMode::SSR_TEST : LocalUiMode::SSR_TEST_BLOCKED;
+      } else if (systemState.status != SystemStatus::FAULT &&
+                 systemState.latchedErrors == ERROR_NONE) {
+        localUiMode = LocalUiMode::FAULT_CLEAR_NO_FAULT;
+      } else if (systemState.validTcCount == 0 ||
+                 !isfinite(systemState.controlTemperatureC)) {
+        localUiMode = LocalUiMode::FAULT_CLEAR_CHECK_TC;
+      } else if ((systemState.latchedErrors & ERROR_OVERTEMP) &&
+                 !overtemperatureClearanceReady()) {
+        localUiMode = LocalUiMode::FAULT_CLEAR_BLOCKED;
+      } else if (systemState.latchedErrors == ERROR_NONE) {
+        localUiMode = LocalUiMode::FAULT_CLEAR_CHECK_TC;
+      } else {
+        systemState.errors &= ~systemState.latchedErrors;
+        systemState.latchedErrors = ERROR_NONE;
+        systemState.mode = OperatingMode::OFF;
+        localUiMode = LocalUiMode::FAULT_CLEAR_DONE;
       }
     }
     if (events.longPress) localUiMode = LocalUiMode::NORMAL;
+    return;
+  }
+  if (localUiMode == LocalUiMode::FAULT_CLEAR_DONE ||
+      localUiMode == LocalUiMode::FAULT_CLEAR_BLOCKED ||
+      localUiMode == LocalUiMode::FAULT_CLEAR_CHECK_TC ||
+      localUiMode == LocalUiMode::FAULT_CLEAR_NO_FAULT) {
+    if (events.shortPress || events.longPress)
+      localUiMode = LocalUiMode::START_MENU;
     return;
   }
   if (localUiMode == LocalUiMode::PID_HEATER_MENU) {

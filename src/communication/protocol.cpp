@@ -128,6 +128,7 @@ void SerialProtocol::handleLine(char *line, uint32_t nowMs) {
         (!isfinite(state_.controlTemperatureC) || state_.controlTemperatureC >= config::MAX_TEMPERATURE_C - 20.0f)) {
       replyError(F("FAULT_STILL_ACTIVE"));
     } else {
+      state_.errors &= ~state_.latchedErrors;
       state_.latchedErrors = ERROR_NONE;
       state_.mode = OperatingMode::OFF;
       tx_.println(F("OK,FAULT_CLEARED"));

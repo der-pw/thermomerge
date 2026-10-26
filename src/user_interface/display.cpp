@@ -167,7 +167,7 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
                  ? "OVERTEMPERATURE" : "TC SENSOR ERROR");
   } else if (uiMode == LocalUiMode::START_MENU) {
     static const char *const items[] = {
-        "SETPOINT", "HEATFLUX", "PID HEATER", "SSR TEST"};
+        "SETPOINT", "HEATFLUX", "PID HEATER", "SSR TEST", "FAULT CLEAR"};
     const uint8_t count = sizeof(items) / sizeof(items[0]);
     snprintf(line1, sizeof(line1), ">%-.15s", items[menuSelection % count]);
     snprintf(line2, sizeof(line2), " %-15s", items[(menuSelection + 1) % count]);
@@ -177,6 +177,18 @@ void Display::update(uint32_t nowMs, const RuntimeState &state,
   } else if (uiMode == LocalUiMode::SSR_TEST_BLOCKED) {
     snprintf(line1, sizeof(line1), "SSR TEST");
     snprintf(line2, sizeof(line2), "OFF + TC OK");
+  } else if (uiMode == LocalUiMode::FAULT_CLEAR_DONE) {
+    snprintf(line1, sizeof(line1), "FAULT CLEARED");
+    snprintf(line2, sizeof(line2), "MODE OFF");
+  } else if (uiMode == LocalUiMode::FAULT_CLEAR_BLOCKED) {
+    snprintf(line1, sizeof(line1), "FAULT ACTIVE");
+    snprintf(line2, sizeof(line2), "COOL BELOW 780C");
+  } else if (uiMode == LocalUiMode::FAULT_CLEAR_CHECK_TC) {
+    snprintf(line1, sizeof(line1), "CHECK TC INPUTS");
+    snprintf(line2, sizeof(line2), "FAULT STILL ON");
+  } else if (uiMode == LocalUiMode::FAULT_CLEAR_NO_FAULT) {
+    snprintf(line1, sizeof(line1), "NO ACTIVE FAULT");
+    snprintf(line2, sizeof(line2), "PRESS=MENU");
   } else if (uiMode == LocalUiMode::PID_HEATER_MENU) {
     snprintf(line1, sizeof(line1), ">%-15s", pidHeaterSelection == 0 ? "AUTOTUNE" : "MANUAL");
     snprintf(line2, sizeof(line2), " %-15s", pidHeaterSelection == 0 ? "MANUAL" : "AUTOTUNE");

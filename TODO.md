@@ -25,7 +25,9 @@
 - Eine Haltezeit von null läuft ohne Zeitlimit und schaltet den Heizer niemals
   aufgrund eines Zeitablaufs ab.
 
-## Mehrpunkt-Kalibrierung für Wärmestromdichte und Temperatur
+## Manuelle Zuordnung von Wärmestromdichte zu Temperatur
+
+Heatflux ist ein zusätzlicher Kennwert des Heizsystems, kein Eingang der Regelung. Für die Kalibrierung wird der Heizer manuell auf Temperatur-Sollwerte gebracht; nach Stabilisierung werden Temperatur und Wärmestrom händisch als Wertepaar erfasst. Der spätere Heizbetrieb bleibt immer temperaturgeführt und benötigt keinen laufenden Wärmestromwert.
 
 - [ ] Datenmodell für mehrere Kalibrierpunkte aus Temperatur und
   Wärmestromdichte (WSD, kW/m²) festlegen, einschließlich maximaler Punktzahl,
@@ -45,22 +47,17 @@
   Flash-Datenbereich ablegen. Das Speicherlayout muss Flash-Schreibzyklen,
   gebündelte Schreibvorgänge und eine spätere Erweiterung berücksichtigen.
 - [ ] Beim Start ungültige, unvollständige oder inkompatible Flash-Daten sicher
-  verwerfen und die Auswahl eines Tabellen-/WSD-Ziels sperren.
-- [ ] Den späteren Betrieb ausschließlich über Temperatur-Sollwerte aus der
-  gespeicherten Lookup-Tabelle auslegen. Im reinen Betriebsmodus wird kein
-  WSD-Sensorwert vorausgesetzt und kein WSD-Regelkreis betrieben.
-- [ ] Für einen gewünschten Tabellen-/WSD-Punkt den daraus berechneten
-  Temperatur-Sollwert und den verwendeten Kalibrierbereich in der seriellen
-  Telemetrie ausgeben; ein live gemessener WSD-Wert ist dafür nicht erforderlich.
+  verwerfen und die Kalibrierreferenz als nicht verfügbar kennzeichnen.
+- [ ] Eine optionale Zuordnungstabelle als manuelle Referenz führen, die
+  Temperatur und Wärmestromdichte (WSD) paarweise abbildet. Sie dient nur dazu,
+  WSD-Werte Temperaturen zuzuordnen; die Regelung verwendet weiterhin
+  ausschließlich Temperatur und benötigt im Heizbetrieb keinen Live-WSD-Wert.
 - [ ] README, Protokolldokumentation und Flash-Speicherlayout aktualisieren.
 - [ ] Tests für Interpolation, Grenzwerte, Flash-Prüfsumme und -Migration,
   ungültige Tabellen, fehlende WSD-Messwerte sowie Neustart ergänzen.
 
 ### Vor der Implementierung klären
 
-- Soll die Kennlinie `Temperatur -> WSD` abbilden und für einen WSD-Zielwert
-  invertiert werden, oder werden die Punkte direkt als `WSD -> Temperatur`
-  gespeichert?
 - Wird die Haltezeit eines Programmschritts sofort nach Setzen des Sollwerts
   gezählt oder erst, nachdem die Isttemperatur ein definiertes Toleranzband
   erreicht hat?
@@ -70,16 +67,14 @@
 
 ### Akzeptanzkriterien
 
-- Während der Kalibrierung ergeben mindestens zwei gültige Kalibrierpunkte
-  reproduzierbar einen Temperatur-Sollwert für eine Ziel-WSD innerhalb des
-  Kalibrierbereichs.
-- Nach abgeschlossener Kalibrierung kann der reine Betrieb ohne verfügbaren
-  WSD-Messwert ausschließlich anhand der Lookup-Tabelle und der
-  Temperaturregelung gefahren werden.
+- Manuell erfasste Kalibrierpaare zeigen die Zuordnung von Temperatur zu WSD
+  innerhalb des gemessenen Bereichs nachvollziehbar an.
+- Temperaturgeführter Heizbetrieb bleibt auch ohne Kalibrierpunkte oder
+  verfügbaren WSD-Messwert vollständig möglich.
 - Die Kalibriertabelle bleibt nach einem Neustart vollständig und durch eine
   Prüfsumme abgesichert im persistenten Flash erhalten.
-- Ohne gültige Tabelle ist die Auswahl eines Tabellen-/WSD-Ziels nicht möglich;
-  ein normaler temperaturgeführter Betrieb bleibt davon getrennt.
+- Ohne gültige Tabelle steht nur die Kalibrierreferenz nicht zur Verfügung;
+  normaler temperaturgeführter Betrieb bleibt davon unberührt.
 - Ein Fehler der Wärmestrommessung oder der Kalibrierdaten umgeht niemals die
   Thermoelement-Plausibilisierung, Übertemperaturabschaltung oder sichere
   Heizerabschaltung.

@@ -34,12 +34,17 @@ uint32_t checksum(const StoredSettings &settings) {
 }
 
 bool valid(const StoredSettings &s) {
+  // NAN is the deliberate "not calibrated" sentinel for heat flux. It must
+  // not invalidate otherwise good PID and setpoint settings.
+  const bool heatFluxFactorValid = isnan(s.heatFluxFactorKwM2PerV) ||
+      (isfinite(s.heatFluxFactorKwM2PerV) &&
+       s.heatFluxFactorKwM2PerV > 0.0f);
   return s.magic == SETTINGS_MAGIC && s.version == SETTINGS_VERSION &&
          s.checksum == checksum(s) && isfinite(s.kp) && isfinite(s.ki) && isfinite(s.kd) &&
          s.kp >= 0.0f && s.ki >= 0.0f && s.kd >= 0.0f &&
          isfinite(s.setpointC) && s.setpointC >= config::MIN_SETPOINT_C &&
          s.setpointC <= config::MAX_SETPOINT_C &&
-         isfinite(s.heatFluxFactorKwM2PerV) && s.heatFluxFactorKwM2PerV > 0.0f &&
+         heatFluxFactorValid &&
          isfinite(s.heatFluxOffsetKwM2);
 }
 }  // namespace

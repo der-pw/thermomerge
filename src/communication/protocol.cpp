@@ -212,10 +212,10 @@ void SerialProtocol::handleMode(char **tokens, uint8_t count) {
   if (state_.status == SystemStatus::FAULT || !state_.temperatureReady) {
     replyError(F("HEATING_NOT_SAFE")); return;
   }
-  if (strcmp(tokens[1], "PID") == 0) {
+  if (strcmp(tokens[1], "SETPOINT") == 0) {
     profile_.stop(); autotune_.stop();
     pid_.reset(state_.controlTemperatureC, state_.outputPercent, state_.setpointC);
-    state_.mode = OperatingMode::PID; tx_.println(F("OK,MODE=PID"));
+    state_.mode = OperatingMode::SETPOINT; tx_.println(F("OK,MODE=SETPOINT"));
   } else if (strcmp(tokens[1], "MANUAL") == 0) {
     profile_.stop(); autotune_.stop(); state_.mode = OperatingMode::MANUAL;
     tx_.println(F("OK,MODE=MANUAL"));
@@ -343,7 +343,7 @@ void SerialProtocol::printStatus(uint32_t nowMs, bool telemetry, const HeatFluxS
   tx_.print(F(",MODE=")); tx_.print(modeName(state_.mode));
   tx_.print(F(",STATUS=")); tx_.print(statusName(state_.status));
   tx_.print(F(",ERRORS=0x")); tx_.print(state_.errors, HEX);
-  tx_.print(F(",PID=")); tx_.print((state_.mode == OperatingMode::PID || state_.mode == OperatingMode::PROFILE) ? F("ON") : F("OFF"));
+  tx_.print(F(",PID=")); tx_.print((state_.mode == OperatingMode::SETPOINT || state_.mode == OperatingMode::PROFILE) ? F("ON") : F("OFF"));
   tx_.print(F(",UI=")); tx_.print(state_.serialUiConnected ? F("REMOTE") : F("LOCAL"));
   if (profile_.state() == ProfileRunState::RUNNING || profile_.state() == ProfileRunState::PAUSED) {
     tx_.print(F(",PROFILE=")); tx_.print(profile_.id());

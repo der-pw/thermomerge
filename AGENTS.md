@@ -77,22 +77,38 @@ und der Nutzer den Upload ausdrücklich beauftragen.
 
 ## Bediengrenzen von Display und Encoder
 
+- Menue, SETPOINT-Dialog und Autotune-Setup werden alle 100 ms aktualisiert; Status- und
+  Messwertansichten werden alle 500 ms aktualisiert. Diese LCD-Intervalle
+  aendern die davon unabhaengigen Sensor-Polling-Intervalle nicht. Im SETPOINT-
+  Dialog zaehlt eine Rastung bei langsamer Drehung 1 °C; bei Rastungsabstaenden
+  bis 120 ms zaehlt sie 10 °C.
+
 - Das 1602-LCD bleibt zunächst die vorgesehene lokale Anzeige; ein Wechsel auf
   ein größeres oder grafisches Display ist nicht erforderlich.
-- PID-Tuningwerte und Autotune-Steuerung bleiben seriell. Display und Encoder
-  dürfen dafür keine lokale Parametrierungs- oder Autotune-Menüführung
-  voraussetzen oder einführen.
+- PID-Tuningparameter und Autotune-Detailwerte bleiben seriell. Der lokale
+  Menüpunkt `PID HEATER` bietet `AUTOTUNE` und `MANUAL`; Autotune darf einen
+  eigenen, nicht persistenten Sollwert und Start/Stop in einem mehrstufigen,
+  auf 16x2 lesbaren Ablauf anbieten. Der Sollwert ist beim ersten Aufruf aus
+  `SETPOINT` vorbelegt, wird danach bis zum
+  Neustart beibehalten und mit 1-/10-Grad-Rastungen geändert. Eine
+  Startauswahl ist erforderlich. Der Status `NUR 2 TC + OK` zeigt fehlende
+  Startfreigabe; im Lauf darf `KURZ=STOP` erscheinen. Ergebnis und Stoppstatus
+  dürfen angezeigt werden, jedoch keine Zyklen oder berechneten PID-Werte.
 - Lokale Anzeigeergänzungen dürfen Temperatur, Sollwert, Ausgang, Modus,
   Profilfortschritt und Fehlerstatus darstellen, ohne die serielle
   Steuerungsarchitektur zu umgehen.
-- Der lokale Bedienfluss startet nach dem Splash auf der normalen
-  Statusseite. Außerhalb von `PROFILE` und `AUTOTUNE` öffnet Longpress das
-  lokale Menü mit `SET SP`, `TC VIEW`, `HEATFLUX` und `HEIZER KAL.`. Drehen
-  wählt, kurzer Tastendruck öffnet den markierten Eintrag. In `HEATFLUX` dreht
+- Der lokale Bedienfluss startet nach dem Splash auf dem Dashboard. Außerhalb
+  von `PROFILE` und `AUTOTUNE` öffnet Longpress das lokale Menü mit
+  `SETPOINT`, `THERMOCOUPLES`, `HEATFLUX`, `PID HEATER` und `SSR TEST`.
+  Drehen wählt, kurzer Tastendruck öffnet den markierten Eintrag. In `HEATFLUX` dreht
   der Encoder zwischen Rohspannung `RAW` in mV und kalibriertem `W/m2` um.
-- Der Sollwertdialog ist nur über `SET SP` erreichbar. Änderungen bleiben
-  bis zur Anzeigeauswahl `OK`/`ABBR.` vorläufig. PID-/Autotune-Befehle und
-  PID-Parameter bleiben davon getrennt und seriell.
+- `SETPOINT` führt zuerst zur Sollwertwahl und danach zur Bestätigung
+  `HEATER ON? YES/NO`. Nur `YES` startet den Temperaturregelkreis und wechselt
+  zum Dashboard mit `RUN`. `NO` sowie Longpress im Dialog setzen Sollwert und
+  Ausgang auf 0/AUS und kehren ins Hauptmenü zurück. Longpress im Dashboard
+  bei laufendem `SETPOINT`-Regelkreis stoppt diesen, setzt den Sollwert auf 0
+  und bleibt auf dem Dashboard; `RUN` verschwindet. Longpress im Hauptmenü
+  kehrt zum Dashboard zurück. Der Autotune-Sollwert ist davon unabhängig.
 - Jede Änderung an Display-, Encoder- oder Menüverhalten muss im selben
   Arbeitsgang im README-Abschnitt „Lokale Bedienung“ dokumentiert werden.
   Dazu gehören Menüeinträge, Navigation, Ein-/Ausstieg sowie angezeigte
@@ -104,6 +120,13 @@ und der Nutzer den Upload ausdrücklich beauftragen.
   frei. Der Besitzstatus muss auf der normalen LCD-Statusseite neben der
   gemittelten Temperatur sichtbar sein (`PC` beziehungsweise `LOC`). Dieser
   Besitzstatus wird nicht persistent gespeichert.
+- Der Start-Splash zeigt jedes Gerät 1,5 Sekunden: Nach 0,5 Sekunden erscheint
+  `PASS`/`FAIL` und bleibt eine Sekunde sichtbar.
+- Das lokale Menue fuehrt zusaetzlich `SSR TEST`. Der Test ist nur bei Modus
+  `OFF`, mindestens einem gueltigen Thermoelement und ohne `FAULT` zulaessig.
+  Er schaltet den SSR dreimal 500 ms EIN, jeweils mit 500 ms AUS dazwischen,
+  und endet sicher AUS. Kurzer oder langer Tastendruck bricht ab; die README
+  dokumentiert Menuefuehrung, Freigabe und Anzeige.
 - Die Detailinformationen des Autotunings bleiben auf der seriellen
   Schnittstelle. Das 1602 muss während `AUTOTUNE` weder Zyklusfortschritt noch
   berechnete PID-Werte anzeigen. `EVENT,AUTOTUNE=SUCCESS,KP=...,KI=...,KD=...`

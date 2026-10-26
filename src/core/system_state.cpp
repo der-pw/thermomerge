@@ -4,7 +4,7 @@ const char *modeName(OperatingMode mode) {
   switch (mode) {
     case OperatingMode::OFF: return "OFF";
     case OperatingMode::MANUAL: return "MANUAL";
-    case OperatingMode::PID: return "PID";
+    case OperatingMode::SETPOINT: return "SETPOINT";
     case OperatingMode::AUTOTUNE: return "AUTOTUNE";
     case OperatingMode::PROFILE: return "PROFILE";
   }
@@ -29,6 +29,6 @@ void enterFault(RuntimeState &state, uint32_t error) {
 
 bool heatingAllowed(const RuntimeState &state) {
   return state.status != SystemStatus::FAULT && state.temperatureReady &&
-         (state.mode == OperatingMode::MANUAL || state.mode == OperatingMode::PID ||
+         (state.mode == OperatingMode::MANUAL || state.mode == OperatingMode::SETPOINT ||
           state.mode == OperatingMode::AUTOTUNE || state.mode == OperatingMode::PROFILE);
 }

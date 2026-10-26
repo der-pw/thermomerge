@@ -37,13 +37,23 @@ bool autotuneReported = false;
 bool setpointEditActive = false;
 bool setpointConfirming = false;
 bool setpointConfirmOk = true;
+uint32_t lastSetpointDetentMs = 0;
+bool hasLastSetpointDetent = false;
 float editSetpointC = config::DEFAULT_SETPOINT_C;
+float autotuneSetpointC = config::DEFAULT_SETPOINT_C;
+bool autotuneSetpointInitialized = false;
+float editAutotuneTargetC = config::DEFAULT_SETPOINT_C;
+bool localAutotuneSucceeded = false;
+bool localAutotuneStopped = false;
 bool lastSerialUiConnected = false;
 // Show live temperature and local ownership immediately after boot.
 LocalUiMode localUiMode = LocalUiMode::NORMAL;
 uint8_t menuSelection = 0;
 bool heatFluxShowWm2 = false;
-float heaterCalibrationTargetC = config::DEFAULT_SETPOINT_C;
+uint8_t pidHeaterSelection = 0;
+uint8_t pidManualSelection = 0;
+float manualKp = config::DEFAULT_KP, manualKi = config::DEFAULT_KI,
+      manualKd = config::DEFAULT_KD;
 
 constexpr uint32_t TC_ERROR_MASK = 0x00000FFFUL;
 constexpr uint32_t SAFETY_LATCH_MASK = ERROR_OVERTEMP | ERROR_INTERNAL;
@@ -95,6 +105,34 @@ void updateSystemFromSensors(const ThermocoupleResult &result) {
       ? SystemStatus::OK : SystemStatus::DEGRADED;
 }
 
+bool startLocalAutotune(uint32_t nowMs) {
+  if (systemState.status == SystemStatus::FAULT ||
+      systemState.validTcCount < config::AUTOTUNE_MIN_VALID_TC ||
+      !autotune.start(editAutotuneTargetC, systemState.controlTemperatureC, nowMs))
+    return false;
+
+  systemState.errors &= ~static_cast<uint32_t>(ERROR_AUTOTUNE_FAILED);
+  systemState.latchedErrors &= ~static_cast<uint32_t>(ERROR_AUTOTUNE_FAILED);
+  profile.stop();
+  systemState.outputPercent = 0.0f;
+  systemState.mode = OperatingMode::AUTOTUNE;
+  localAutotuneSucceeded = false;
+  localAutotuneStopped = false;
+  autotuneReported = false;
+  return true;
+}
+
+void stopLocalSetpoint(uint32_t nowMs) {
+  systemState.mode = OperatingMode::OFF;
+  systemState.setpointC = 0.0f;
+  systemState.outputPercent = 0.0f;
+  heater.forceOff();
+  settings.markSetpointDirty(nowMs, 0.0f);
+  setpointEditActive = false;
+  setpointConfirming = false;
+  hasLastSetpointDetent = false;
+}
+
 void updateEncoder(uint32_t nowMs) {
   const EncoderEvents events = encoder.update(nowMs);
   if (systemState.serialUiConnected) {
@@ -106,29 +144,104 @@ void updateEncoder(uint32_t nowMs) {
   if (localUiMode == LocalUiMode::START_MENU) {
     if (events.detents != 0) {
       int16_t selection = static_cast<int16_t>(menuSelection) + events.detents;
-      selection %= 4;
-      if (selection < 0) selection += 4;
+      selection %= 5;
+      if (selection < 0) selection += 5;
       menuSelection = static_cast<uint8_t>(selection);
     }
     if (events.shortPress) {
       if (menuSelection == 0) {
-        localUiMode = LocalUiMode::NORMAL;
-        editSetpointC = systemState.setpointC;
-        setpointEditActive = true;
-        setpointConfirming = false;
-        setpointConfirmOk = true;
-        display.showMainPage();
+        if (systemState.status == SystemStatus::FAULT || !systemState.temperatureReady) {
+          localUiMode = LocalUiMode::SETPOINT_BLOCKED;
+        } else {
+          localUiMode = LocalUiMode::NORMAL;
+          editSetpointC = systemState.setpointC;
+          systemState.mode = OperatingMode::OFF;
+          systemState.outputPercent = 0.0f;
+          heater.forceOff();
+          setpointEditActive = true;
+          setpointConfirming = false;
+          setpointConfirmOk = true;
+          hasLastSetpointDetent = false;
+          display.showMainPage();
+        }
       } else if (menuSelection == 1) {
         localUiMode = LocalUiMode::TC_VIEW;
       } else if (menuSelection == 2) {
         localUiMode = LocalUiMode::HEATFLUX_VIEW;
         heatFluxShowWm2 = false;
+      } else if (menuSelection == 3) {
+        pidHeaterSelection = 0;
+        localUiMode = LocalUiMode::PID_HEATER_MENU;
       } else {
-        heaterCalibrationTargetC = systemState.setpointC;
-        localUiMode = LocalUiMode::HEATER_CAL_READY;
+        const bool testPermitted = systemState.mode == OperatingMode::OFF &&
+            systemState.status != SystemStatus::FAULT && systemState.temperatureReady;
+        localUiMode = heater.startTest(nowMs, testPermitted)
+            ? LocalUiMode::SSR_TEST : LocalUiMode::SSR_TEST_BLOCKED;
       }
     }
     if (events.longPress) localUiMode = LocalUiMode::NORMAL;
+    return;
+  }
+  if (localUiMode == LocalUiMode::PID_HEATER_MENU) {
+    if (events.detents != 0) pidHeaterSelection = events.detents < 0 ? 0 : 1;
+    if (events.shortPress) {
+      if (pidHeaterSelection == 0) {
+        if (!autotuneSetpointInitialized) {
+          autotuneSetpointC = systemState.setpointC > config::MIN_SETPOINT_C
+              ? systemState.setpointC : config::DEFAULT_SETPOINT_C;
+          autotuneSetpointInitialized = true;
+        }
+        editAutotuneTargetC = autotuneSetpointC;
+        setpointConfirmOk = true;
+        hasLastSetpointDetent = false;
+        localUiMode = LocalUiMode::AUTOTUNE_SETPOINT;
+      } else {
+        pid.getTunings(manualKp, manualKi, manualKd);
+        pidManualSelection = 0;
+        localUiMode = LocalUiMode::PID_MANUAL_SELECT;
+      }
+    }
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    return;
+  }
+  if (localUiMode == LocalUiMode::PID_MANUAL_SELECT ||
+      localUiMode == LocalUiMode::PID_MANUAL_EDIT) {
+    if (localUiMode == LocalUiMode::PID_MANUAL_SELECT && events.detents != 0) {
+      int16_t selection = static_cast<int16_t>(pidManualSelection) + events.detents;
+      selection %= 4; if (selection < 0) selection += 4;
+      pidManualSelection = static_cast<uint8_t>(selection);
+    } else if (localUiMode == LocalUiMode::PID_MANUAL_EDIT &&
+               pidManualSelection < 3 && events.detents != 0) {
+      const bool fastTurn = events.detents > 1 || events.detents < -1 ||
+          (hasLastSetpointDetent && nowMs - lastSetpointDetentMs <= config::ENCODER_FAST_TURN_INTERVAL_MS);
+      const float step = (pidManualSelection == 1 ? 0.01f : 0.1f) * (fastTurn ? 10.0f : 1.0f);
+      float *value = pidManualSelection == 0 ? &manualKp :
+                     pidManualSelection == 1 ? &manualKi : &manualKd;
+      *value = constrain(*value + events.detents * step, 0.0f, 1000.0f);
+      lastSetpointDetentMs = nowMs; hasLastSetpointDetent = true;
+    }
+    if (events.shortPress) {
+      hasLastSetpointDetent = false;
+      if (localUiMode == LocalUiMode::PID_MANUAL_EDIT) {
+        localUiMode = LocalUiMode::PID_MANUAL_SELECT;
+      } else if (pidManualSelection == 3) {
+        setpointConfirmOk = true;
+        localUiMode = LocalUiMode::PID_MANUAL_SAVE_CONFIRM;
+      } else {
+        localUiMode = LocalUiMode::PID_MANUAL_EDIT;
+      }
+    }
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    return;
+  }
+  if (localUiMode == LocalUiMode::PID_MANUAL_SAVE_CONFIRM) {
+    if (events.detents != 0) setpointConfirmOk = events.detents < 0;
+    if (events.shortPress) {
+      pid.setTunings(manualKp, manualKi, manualKd);
+      if (setpointConfirmOk) settings.markDirty(nowMs);
+      localUiMode = LocalUiMode::START_MENU;
+    }
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
     return;
   }
   if (localUiMode == LocalUiMode::TC_VIEW ||
@@ -138,65 +251,126 @@ void updateEncoder(uint32_t nowMs) {
     if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
     return;
   }
-  if (localUiMode == LocalUiMode::HEATER_CAL_READY ||
-      localUiMode == LocalUiMode::HEATER_CAL_RUNNING) {
+  if (localUiMode == LocalUiMode::SSR_TEST) {
+    if (events.shortPress || events.longPress) {
+      heater.cancelTest();
+      localUiMode = LocalUiMode::NORMAL;
+    }
+    return;
+  }
+  if (localUiMode == LocalUiMode::SSR_TEST_BLOCKED) {
+    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
+    return;
+  }
+  if (localUiMode == LocalUiMode::AUTOTUNE_SETPOINT) {
     if (events.detents != 0) {
-      heaterCalibrationTargetC = constrain(
-          heaterCalibrationTargetC + events.detents * config::ENCODER_STEP_C,
+      const bool fastTurn = events.detents > 1 || events.detents < -1 ||
+          (hasLastSetpointDetent &&
+           nowMs - lastSetpointDetentMs <= config::ENCODER_FAST_TURN_INTERVAL_MS);
+      const float stepC = config::ENCODER_STEP_C * (fastTurn ? 10.0f : 1.0f);
+      editAutotuneTargetC = constrain(
+          editAutotuneTargetC + events.detents * stepC,
           config::MIN_SETPOINT_C, config::MAX_SETPOINT_C);
-      if (localUiMode == LocalUiMode::HEATER_CAL_RUNNING)
-        systemState.setpointC = heaterCalibrationTargetC;
+      lastSetpointDetentMs = nowMs;
+      hasLastSetpointDetent = true;
     }
     if (events.shortPress) {
-      if (localUiMode == LocalUiMode::HEATER_CAL_READY) {
-        if (systemState.status != SystemStatus::FAULT && systemState.temperatureReady) {
-          systemState.setpointC = heaterCalibrationTargetC;
-          pid.reset(systemState.controlTemperatureC, 0.0f, systemState.setpointC);
-          systemState.mode = OperatingMode::PID;
-          localUiMode = LocalUiMode::HEATER_CAL_RUNNING;
-        }
+      setpointConfirmOk = true;
+      hasLastSetpointDetent = false;
+      localUiMode = LocalUiMode::AUTOTUNE_CONFIRM;
+    }
+    if (events.longPress) {
+      localUiMode = LocalUiMode::START_MENU;
+      hasLastSetpointDetent = false;
+    }
+    return;
+  }
+  if (localUiMode == LocalUiMode::AUTOTUNE_CONFIRM) {
+    if (events.detents != 0) setpointConfirmOk = events.detents < 0;
+    if (events.shortPress) {
+      if (setpointConfirmOk) {
+        autotuneSetpointC = editAutotuneTargetC;
+        localUiMode = startLocalAutotune(nowMs)
+            ? LocalUiMode::AUTOTUNE_RUNNING : LocalUiMode::AUTOTUNE_BLOCKED;
       } else {
-        systemState.mode = OperatingMode::OFF;
-        systemState.outputPercent = 0.0f;
-        heater.forceOff();
         localUiMode = LocalUiMode::START_MENU;
       }
     }
-    if (events.longPress) {
-      systemState.mode = OperatingMode::OFF;
-      systemState.outputPercent = 0.0f;
-      heater.forceOff();
-      localUiMode = LocalUiMode::START_MENU;
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    return;
+  }
+  if (localUiMode == LocalUiMode::AUTOTUNE_RUNNING) {
+    if (events.shortPress || events.longPress) {
+      if (systemState.mode == OperatingMode::AUTOTUNE) {
+        autotune.stop();
+        systemState.mode = OperatingMode::OFF;
+        systemState.outputPercent = 0.0f;
+        heater.forceOff();
+      }
+      localAutotuneSucceeded = false;
+      localAutotuneStopped = true;
+      localUiMode = LocalUiMode::AUTOTUNE_RESULT;
     }
+    return;
+  }
+  if (localUiMode == LocalUiMode::AUTOTUNE_RESULT ||
+      localUiMode == LocalUiMode::AUTOTUNE_BLOCKED) {
+    if (events.shortPress || events.longPress) localUiMode = LocalUiMode::NORMAL;
     return;
   }
   if (setpointEditActive) {
     if (events.detents != 0) {
       if (setpointConfirming) {
-        // OK is the left choice and ABBR. the right choice on the LCD.
+        // YES is the left choice and NO the right choice on the LCD.
         setpointConfirmOk = events.detents < 0;
       } else {
-        editSetpointC = constrain(editSetpointC + events.detents * config::ENCODER_STEP_C,
+        const bool fastTurn = events.detents > 1 || events.detents < -1 ||
+            (hasLastSetpointDetent &&
+             nowMs - lastSetpointDetentMs <= config::ENCODER_FAST_TURN_INTERVAL_MS);
+        const float stepC = config::ENCODER_STEP_C * (fastTurn ? 10.0f : 1.0f);
+        editSetpointC = constrain(editSetpointC + events.detents * stepC,
                                   config::MIN_SETPOINT_C, config::MAX_SETPOINT_C);
+        lastSetpointDetentMs = nowMs;
+        hasLastSetpointDetent = true;
       }
     }
     if (events.shortPress) {
       if (!setpointConfirming) {
         setpointConfirming = true;
       } else if (setpointConfirmOk) {
-        systemState.setpointC = editSetpointC;
-        settings.markSetpointDirty(nowMs, systemState.setpointC);
-        setpointEditActive = false;
-        setpointConfirming = false;
+        if (systemState.status != SystemStatus::FAULT && systemState.temperatureReady) {
+          systemState.setpointC = editSetpointC;
+          settings.markSetpointDirty(nowMs, systemState.setpointC);
+          pid.reset(systemState.controlTemperatureC, systemState.outputPercent,
+                    systemState.setpointC);
+          systemState.mode = OperatingMode::SETPOINT;
+          setpointEditActive = false;
+          setpointConfirming = false;
+          hasLastSetpointDetent = false;
+          display.showMainPage();
+        } else {
+          stopLocalSetpoint(nowMs);
+          localUiMode = LocalUiMode::SETPOINT_BLOCKED;
+        }
       } else {
-        setpointEditActive = false;
-        setpointConfirming = false;
+        stopLocalSetpoint(nowMs);
+        localUiMode = LocalUiMode::START_MENU;
       }
     }
     if (events.longPress) {
-      setpointEditActive = false;
-      setpointConfirming = false;
+      stopLocalSetpoint(nowMs);
+      localUiMode = LocalUiMode::START_MENU;
     }
+    return;
+  }
+  if (localUiMode == LocalUiMode::SETPOINT_BLOCKED) {
+    if (events.shortPress) localUiMode = LocalUiMode::NORMAL;
+    if (events.longPress) localUiMode = LocalUiMode::START_MENU;
+    return;
+  }
+  if (events.longPress && systemState.mode == OperatingMode::SETPOINT) {
+    stopLocalSetpoint(nowMs);
+    localUiMode = LocalUiMode::NORMAL;
     return;
   }
   if (events.longPress && systemState.mode != OperatingMode::PROFILE &&
@@ -244,7 +418,7 @@ void updateControl(uint32_t nowMs) {
     case OperatingMode::MANUAL:
       systemState.outputPercent = systemState.manualOutputPercent;
       break;
-    case OperatingMode::PID:
+    case OperatingMode::SETPOINT:
       systemState.outputPercent = pid.compute(systemState.setpointC, systemState.controlTemperatureC);
       break;
     case OperatingMode::PROFILE:
@@ -336,21 +510,43 @@ void loop() {
 
   updateProfile(nowMs);
   updateControl(nowMs);
+  if (localUiMode == LocalUiMode::AUTOTUNE_RUNNING &&
+      systemState.mode != OperatingMode::AUTOTUNE) {
+    localAutotuneSucceeded = autotune.result() == AutotuneResult::SUCCEEDED;
+    localAutotuneStopped = false;
+    localUiMode = systemState.status == SystemStatus::FAULT
+        ? LocalUiMode::NORMAL : LocalUiMode::AUTOTUNE_RESULT;
+  }
   heater.setDemand(systemState.outputPercent);
-  heater.update(nowMs, heatingAllowed(systemState));
+  const bool ssrTestPermitted = systemState.mode == OperatingMode::OFF &&
+      systemState.status != SystemStatus::FAULT && systemState.temperatureReady;
+  heater.update(nowMs, heatingAllowed(systemState), ssrTestPermitted);
+  if (localUiMode == LocalUiMode::SSR_TEST && !heater.testActive())
+    localUiMode = LocalUiMode::NORMAL;
   updateStatusLed(nowMs);
 
   if (nowMs - lastTelemetryMs >= config::TELEMETRY_INTERVAL_MS) {
     lastTelemetryMs = nowMs;
     protocol.telemetry(nowMs, heatFlux);
   }
-  const uint32_t displayIntervalMs = localUiMode == LocalUiMode::START_MENU
-      ? config::LCD_MENU_INTERVAL_MS : config::LCD_VALUE_INTERVAL_MS;
+  const uint32_t displayIntervalMs =
+      localUiMode == LocalUiMode::START_MENU || setpointEditActive ||
+              localUiMode == LocalUiMode::AUTOTUNE_SETPOINT ||
+              localUiMode == LocalUiMode::AUTOTUNE_CONFIRM ||
+              localUiMode == LocalUiMode::PID_HEATER_MENU ||
+              localUiMode == LocalUiMode::PID_MANUAL_SELECT ||
+              localUiMode == LocalUiMode::PID_MANUAL_EDIT ||
+              localUiMode == LocalUiMode::PID_MANUAL_SAVE_CONFIRM
+          ? config::LCD_INTERACTION_INTERVAL_MS
+          : config::LCD_MEASUREMENT_INTERVAL_MS;
   if (nowMs - lastDisplayMs >= displayIntervalMs) {
     lastDisplayMs = nowMs;
     display.update(nowMs, systemState, profile, setpointEditActive,
                    editSetpointC, setpointConfirming, setpointConfirmOk,
-                   localUiMode, menuSelection, heaterCalibrationTargetC,
+                   localAutotuneSucceeded, localAutotuneStopped,
+                   localUiMode, menuSelection,
+                   editAutotuneTargetC,
+                   pidHeaterSelection, pidManualSelection, manualKp, manualKi, manualKd,
                    heatFluxShowWm2,
                    heatFlux.valid() && heatFlux.calibrationValid()
                        ? heatFlux.engineeringValue() : NAN,

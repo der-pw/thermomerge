@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-enum class OperatingMode : uint8_t { OFF, MANUAL, PID, AUTOTUNE, PROFILE };
+enum class OperatingMode : uint8_t { OFF, MANUAL, SETPOINT, AUTOTUNE, PROFILE };
 enum class SystemStatus : uint8_t { OK, DEGRADED, FAULT };
 
 enum ErrorBit : uint32_t {

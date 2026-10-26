@@ -57,8 +57,8 @@ Es gibt keine `delay()`-basierte Prozesssteuerung und keine blockierenden Serial
 | PID / Autotune | feste 100 ms |
 | optionaler Wärmestrom-ADC | 150 ms |
 | Telemetrie | 500 ms |
-| LCD-Menü | 100 ms |
-| LCD-Wert-/Statusseiten | 500 ms |
+| LCD-Menü, SETPOINT-Dialog und PID HEATER | 100 ms |
+| LCD-Status- und Messwertansichten | 500 ms |
 | SSR-Burst-Window | 1000 ms |
 
 Der Serial-Parser verarbeitet höchstens 64 Zeichen pro Schleifendurchlauf. Ausgaben laufen über einen statischen 2048-Byte-TX-Ringpuffer und werden nur bis zum aktuell freien USB-CDC-Puffer übertragen; automatische Telemetrie wird bei Rückstau verworfen statt die Regelung anzuhalten. Auch ein dauerhaft sendender oder nicht mehr lesender Host kann dadurch die Regelaufgaben nicht verdrängen. Profile und Regelung benötigen nach dem Start keine USB-Verbindung.
@@ -91,7 +91,7 @@ Betriebsmodus und Systemzustand sind voneinander unabhängig:
 
 - `OFF`: Heizer aus; einziger Modus nach dem Booten.
 - `MANUAL`: feste Ausgangsleistung, weiterhin durch alle Sicherheitsgrenzen überwacht.
-- `PID`: Regelung auf den zentralen Sollwert.
+- `SETPOINT`: Temperaturregelung auf den zentralen Sollwert (der Regler verwendet intern die PID-Parameter Kp, Ki und Kd).
 - `AUTOTUNE`: kontrollierte Relay-Oszillation zur Parameterbestimmung.
 - `PROFILE`: autonomer Rampen-/Halteprogramm-Ablauf.
 
@@ -117,30 +117,39 @@ Der RP2350-Hardware-Watchdog läuft mit 2 s Timeout. Er wird nur gefüttert, wen
 
 ## PID und Autotune
 
-Der PID arbeitet mit fester 100-ms-Abtastzeit und einem Ausgang von 0 bis 100 %. Er verwendet Ableitung auf dem Messwert, bedingte Integration gegen Windup und eine initialisierte Integralkomponente für möglichst stoßarme Moduswechsel. Der zentrale Sollwert wird über den lokal bestätigten Sollwertdialog oder mit `SET,SP=...` geändert; während `PROFILE` gehört er ausschließlich dem Profilgenerator.
+Der PID arbeitet mit fester 100-ms-Abtastzeit und einem Ausgang von 0 bis 100 %. Er verwendet Ableitung auf dem Messwert, bedingte Integration gegen Windup und eine initialisierte Integralkomponente für möglichst stoßarme Moduswechsel. Der zentrale Sollwert wird über `SETPOINT` oder seriell mit `SET,SP=...` geändert; während `PROFILE` gehört er ausschließlich dem Profilgenerator.
 
-Autotune wird vom Rechner gestartet. Ein Relay-Verfahren erzeugt kontrollierte Schwingungen um die Zieltemperatur, misst Periodendauer und Amplitude über fünf Zyklen und berechnet konservative, Tyreus-Luyben-artige Parameter. Autotune stoppt bei Sensorverlust unter zwei Kanäle, Übertemperatur, Timeout, `FAULT` oder `AUTOTUNE,STOP`. Bei Erfolg werden die Werte übernommen, verzögert gespeichert und als `EVENT,AUTOTUNE=SUCCESS,KP=...,KI=...,KD=...` gemeldet. Dieses Event wird erst nach Übernahme der Parameter ausgegeben und bestätigt dem PC damit die erfolgreiche Anwendung; die Detailwerte müssen nicht zusätzlich auf dem 1602 erscheinen. Das thermische System muss Autotune sicher vertragen; Autotune ersetzt keine Leistungs- und Temperaturbegrenzung.
+Der lokale Menüpunkt `PID HEATER` bietet `AUTOTUNE` und `MANUAL`. `MANUAL` lädt die aktuell aktiven PID-Werte. Drehen wählt Kp, Ki, Kd oder SAVE; kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Rastungsabständen bis 120 ms gelten Schritte von 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf SAVE öffnet `SAVE PID VALUES` mit `YES`/`NO`. Beide Optionen übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; YES veranlasst die verzögerte EEPROM-Speicherung, NO behält die Werte nur bis zum Neustart. Langer Druck führt aus der Kp/Ki/Kd/SAVE-Auswahl und aus der Speicherabfrage ins Hauptmenü; langer Druck im Hauptmenü führt zurück zur Statusseite. Ohne gespeicherte Werte gelten Kp=2,0, Ki=0,10 und Kd=5,0.
 
+`AUTOTUNE` kann lokal oder seriell gestartet werden. Der lokale Autotune-Sollwert wird beim ersten Aufruf aus `SETPOINT` vorbelegt (bei SP=0 mit dem Standardwert 25 °C), danach bis zum Neustart separat gehalten und nicht persistent gespeichert. Das Relay-Verfahren erzeugt kontrollierte Schwingungen um diesen Sollwert, misst Periodendauer und Amplitude über fünf Zyklen und berechnet konservative, Tyreus-Luyben-artige Parameter. Mindestens zwei gültige Thermoelemente sind erforderlich. Sensorverlust unter zwei Kanälen, Übertemperatur, Timeout, `FAULT` oder `AUTOTUNE,STOP` brechen ab. Bei Erfolg werden die neuen Werte unmittelbar übernommen und zur verzögerten Speicherung vorgemerkt; anschließend meldet die Firmware `EVENT,AUTOTUNE=SUCCESS,KP=...,KI=...,KD=...`. Das Event bestätigt die Übernahme, die Detailwerte bleiben seriell. Der lokale Bildschirm zeigt Status und Ergebnis, aber keine Zyklen oder PID-Werte. Autotune ersetzt keine Leistungs- und Temperaturbegrenzung.
 ## Lokale Bedienung
 
-- Der Splashscreen zeigt zunächst zwei Sekunden lang nur `CONE HEIZER`, dann
+- Der Splashscreen zeigt zunächst zwei Sekunden lang nur `CONE HEATER`, dann
   nacheinander den ADS1220 und die drei MAX31855-
-  Thermoelementwandler. Jeder Eintrag bleibt drei Sekunden sichtbar; während
-  der ersten Sekunde bleibt der vierstellige Ergebnisplatz frei, danach
-  erscheint `PASS` oder `FAIL`. Der Gerätename behält dabei dieselbe
+  Thermoelementwandler. Jeder Geräteeintrag bleibt 1,5 Sekunden sichtbar:
+  Nach 0,5 Sekunden erscheint `PASS` oder `FAIL` und bleibt eine Sekunde stehen.
+  Der Gerätename behält dabei dieselbe
   Zentrierung. `PASS` beim ADS1220 bestätigt den Register-Readback über SPI,
   bei den MAX31855 eine endliche Temperatur ohne gesetzte Fehlerflags. Danach
   erscheint die normale Statusseite mit gemittelter Temperatur und
   Bedienstatus (`LOC`).
+- Menü, SETPOINT-Dialog und PID-HEATER-Einstellungen werden alle 100 ms aktualisiert; Status- und
+  Messwertansichten werden alle 500 ms aktualisiert. Das betrifft die
+  LCD-Anzeige, nicht die davon unabhängigen Sensor-Polling-Intervalle.
 - Die Statusseite erscheint direkt nach dem Start. Kurzer Tastendruck wechselt
   zwischen den beiden Statusseiten. Langer Tastendruck öffnet außerhalb von
   `PROFILE` und `AUTOTUNE` das lokale Menü.
-- Das Menü enthält in dieser Reihenfolge `SET SP`, `TC VIEW`, `HEATFLUX`
-  und `HEIZER KAL.`. Das Display zeigt den markierten Eintrag und den folgenden
-  Eintrag; Drehen verschiebt die Auswahl zyklisch durch alle vier Punkte.
-  Kurzer Tastendruck öffnet den markierten Punkt. Langer Tastendruck im Menü
-  kehrt zur Statusseite zurück.
-- `TC VIEW` zeigt die drei plausibilisierten Thermoelementwerte; nicht
+- Das Menü enthält `SETPOINT`, `THERMOCOUPLES`, `HEATFLUX`, `PID HEATER` und `SSR TEST`. Drehen wählt zyklisch; kurzer Druck öffnet den Eintrag. Langer Druck kehrt aus dem Hauptmenü zum Dashboard zurück.
+- `PID HEATER` zeigt `AUTOTUNE` und `MANUAL`. In `AUTOTUNE` wird der Sollwert beim ersten Aufruf aus `SETPOINT` übernommen und danach bis zum Neustart unabhängig gehalten. Langsames Drehen ändert ihn in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck öffnet die Startabfrage `YES`/`CANCEL`; Drehen wählt, kurzer Druck bestätigt. Der Start erfordert mindestens zwei gültige Thermoelemente und keinen `FAULT`; andernfalls erscheint `2+ TC REQUIRED`. Im Lauf zeigt das Display `AUTOTUNE`/`PRESS=STOP`; kurzer oder langer Tastendruck stoppt. Erfolg, Fehler oder Stopp werden angezeigt; Zyklen und PID-Werte bleiben seriell.
+- In `MANUAL` werden die aktuell aktiven Werte geladen. Drehen wählt zyklisch `Kp`, `Ki`, `Kd` und `SAVE`. Kurzer Druck auf Kp/Ki/Kd öffnet bzw. beendet die Bearbeitung. Langsame Rastungen ändern Kp/Kd um 0,1 und Ki um 0,01; bei Abständen bis 120 ms sind es 1,0 bzw. 0,1. Die Werte sind auf 0 bis 1000 begrenzt. Kurzer Druck auf `SAVE` öffnet `YES`/`NO`; Drehen wählt, kurzer Druck bestätigt. Beide Antworten übernehmen die Werte in den laufenden PID-Regler und kehren ins Hauptmenü zurück; `YES` speichert sie verzögert persistent, `NO` übernimmt sie nur bis zum Neustart. Langer Druck führt aus der Kp/Ki/Kd/SAVE-Auswahl oder dem Dialog ins Hauptmenü. Langer Druck im Hauptmenü kehrt zur Statusseite zurück.
+- `SSR TEST` ist nur bei Betriebsmodus `OFF`, mindestens einem gültigen
+  Thermoelement und ohne `FAULT` verfügbar. Der Test schaltet den SSR dreimal
+  je 500 ms ein, mit jeweils 500 ms AUS zwischen den Pulsen, und endet AUS.
+  Während des Tests zeigt das LCD `SSR TEST` und `3x500ms ON/OFF`; kurzer oder
+  langer Tastendruck bricht den Test ab. Bei fehlender Freigabe erscheint
+  `OFF + TC OK`; kurzer oder langer Tastendruck kehrt zurück. Der Test
+  schaltet eine angeschlossene Last tatsächlich ein.
+- `THERMOCOUPLES` zeigt die drei plausibilisierten Thermoelementwerte; nicht
   verfügbare Kanäle erscheinen als `--`. `HEATFLUX` startet in `RAW` und zeigt
   die Rohspannung in mV. Drehen wechselt zwischen `RAW` und `W/m2`; der
   gewählte Modus steht in der Überschrift. `W/m2` wird aus dem kalibrierten
@@ -148,47 +157,35 @@ Autotune wird vom Rechner gestartet. Ein Relay-Verfahren erzeugt kontrollierte S
   `UNCALIBRATED`. Bei deaktiviertem Backend, Sensorfehler oder ungültiger
   Messung wird der entsprechende Sensorstatus angezeigt. Kurzer oder langer
   Tastendruck schließt die Ansichten und kehrt zur Statusseite zurück.
-- `HEIZER KAL.` besitzt einen zusätzlichen Startschritt: Zuerst wird die
-  Zieltemperatur gewählt, anschließend startet ein kurzer Tastendruck den
-  PID-Betrieb. Während des Anfahrens kann die Zieltemperatur weiter mit dem
-  Encoder verändert werden. Ein kurzer Tastendruck beendet den Vorgang und
-  schaltet den Heizer aus; ein langer Tastendruck bricht ebenfalls ab.
-- Während der Kalibrieransicht werden Isttemperatur, Zieltemperatur und –
-  sobald kalibriert – die Wärmestromdichte angezeigt. Die Messwerte erscheinen
-  weiterhin auch in der seriellen Telemetrie.
-- `SET SP` öffnet den Sollwertdialog. Änderungen bleiben zunächst vorläufig;
-  kurzer Tastendruck öffnet `OK`/`ABBR.`. Drehen wählt die Aktion, kurzer
-  Tastendruck bestätigt sie. `OK` übernimmt den Wert, `ABBR.` verwirft ihn.
-  Langer Tastendruck bricht den Dialog ab. Er bleibt außerhalb von `PROFILE`
-  und `AUTOTUNE` verfügbar.
-- Der bestätigte Sollwert wird verzögert gespeichert. PID- und Autotune-
-  Steuerung sowie PID-Parameter bleiben seriell.
+- `SETPOINT` öffnet zuerst die Sollwertwahl. Langsames Drehen ändert den Wert in 1-°C-Schritten, Rastungen innerhalb von 120 ms in 10-°C-Schritten. Kurzer Druck führt zur Abfrage `HEATER ON?` mit `YES`/`NO`. `YES` startet bei gültiger Temperatur und ohne `FAULT` den Regelkreis und zeigt im Dashboard `RUN`; der Sollwert wird verzögert gespeichert. `NO` setzt den Sollwert auf 0, schaltet den Heizer aus und kehrt ins Hauptmenü zurück. Langer Druck während Auswahl oder Abfrage bricht ab, setzt den Sollwert auf 0 und kehrt ins Hauptmenü zurück. Langer Druck im laufenden Dashboard-Regelkreis stoppt den Heizer, setzt den Sollwert auf 0 und bleibt auf dem Dashboard; `RUN` verschwindet.
+- Der bestätigte Sollwert wird verzögert gespeichert. PID-Parameter können lokal unter `PID HEATER` oder seriell geändert werden; Autotune-Details bleiben seriell.
 - Kurzer Tastendruck auf der normalen Statusseite wechselt die LCD-Statusseite.
 
 Profile werden nicht lokal editiert.
 
 ### Display-Mockups (1602)
 
-Die folgenden Beispiele zeigen die vorgesehenen 16×2-Anzeigen. Das Menü wird
-alle 100 ms, Wert- und Statusseiten werden alle 500 ms aktualisiert. Die
-serielle Telemetrie läuft unabhängig davon ebenfalls alle 500 ms. `PC` bedeutet,
+Die folgenden Beispiele zeigen die vorgesehenen 16×2-Anzeigen. Menü und
+SETPOINT-Dialog werden alle 100 ms, Status- und Messwertansichten alle 500 ms
+aktualisiert. Die serielle Telemetrie läuft unabhängig davon ebenfalls alle
+500 ms. `PC` bedeutet,
 dass `UI,CONNECT` aktiv ist und
 der Encoder gesperrt wurde, `LOC` steht für lokale Bedienfreigabe.
 
-Splashscreen, jeweils mittig ausgerichtet. Nach zwei Sekunden Intro folgt der
-ADS1220. Der Status erscheint eine Sekunde nach dem Gerätenamen; nach drei
-Sekunden folgt der nächste Eintrag:
+Splashscreen, mittig ausgerichtet. Nach zwei Sekunden Intro folgen ADS1220
+und die drei MAX31855. Jeder Eintrag bleibt 1,5 Sekunden: Nach 0,5 Sekunden
+erscheint `PASS`/`FAIL` und bleibt eine Sekunde stehen.
 
 ```text
-CONE HEIZER
+CONE HEATER
 
 ... zwei Sekunden ...
 ADS1220
-... eine Sekunde ...
+... 0,5 Sekunden bis zum Ergebnis ...
 ADS1220 PASS
-... drei Sekunden insgesamt ...
+... PASS / FAIL bleibt eine Sekunde; nach 1,5 Sekunden folgt MAX31855 1 ...
 MAX31855 1
-... eine Sekunde ...
+... 0,5 Sekunden bis zum Ergebnis ...
 MAX31855 1 PASS
 ... anschließend MAX31855 2 und 3 ...
 ```
@@ -216,15 +213,27 @@ Encoder verändert dann weder Sollwert noch LCD-Seite.
 Zweite Statusseite, beispielsweise im PID-Betrieb:
 
 ```text
-MODE:PID
+MODE:SETPOINT
 TC:3 ERR:0000
 ```
 
-Menü nach Longpress (Auswahl `SET SP`; der nächste Eintrag steht darunter):
+Menü nach Longpress (Auswahl `SETPOINT`; der nächste Eintrag steht darunter):
 
 ```text
->SET SP
- TC VIEW
+>SETPOINT
+ THERMOCOUPLES
+```
+
+Menüeintrag `SSR TEST` und laufende Impulsfolge:
+
+```text
+>SSR TEST
+ SETPOINT
+```
+
+```text
+SSR TEST
+3x500ms ON/OFF
 ```
 
 Thermoelementansicht:
@@ -248,27 +257,91 @@ HEATFLUX W/m2
 VAL:1250.00 W/m2
 ```
 
-Sollwertdialog nach Auswahl von `SET SP`:
+SETPOINT auswählen; kurzer Druck wechselt zur Startfrage:
 
 ```text
-SET SP:500.0 C
-DREHEN KURZ=OK
+SETPOINT:500.0 C
+TURN PRESS=NEXT
 ```
 
-Nach kurzem Druck wird die Auswahl bestätigt:
+Heizkreis ausdrücklich starten:
 
 ```text
-SET SP:500.0 C
-OK<    ABBR.
+HEATER ON?
+YES<    NO
 ```
 
-Durch Drehen kann `ABBR.` ausgewählt werden:
+Dashboard während des laufenden Regelkreises:
 
 ```text
-SET SP:500.0 C
-OK     ABBR.<
+T:123.4 LOC RUN
+SP:500 O: 42 OK
 ```
 
+Menüauswahl `PID HEATER`:
+
+```text
+>PID HEATER
+ SSR TEST
+```
+
+Auswahl zwischen Autotune und manueller Einstellung:
+
+```text
+>AUTOTUNE
+ MANUAL
+```
+
+MANUAL-Auswahl. Drehen wechselt zwischen Kp, Ki, Kd und SAVE; bei Kp/Ki/Kd zeigt das Display den gewählten Parameter samt Wert:
+
+```text
+>Kp:  2.000
+TURN PRESS=EDIT
+```
+
+SAVE ist der vierte Menüpunkt und öffnet mit kurzem Druck die Speicherfrage:
+
+```text
+>SAVE
+PRESS=SELECT
+```
+
+```text
+SAVE PID VALUES
+YES<    NO
+```
+AUTOTUNE: Zielwert bearbeiten und Start bestätigen:
+
+```text
+AT SP:500.0 C
+TURN PRESS=OK
+```
+
+```text
+START AT:500.0C
+YES<    CANCEL
+```
+
+Autotune läuft; kurzer oder langer Tastendruck stoppt es:
+
+```text
+AUTOTUNE
+PRESS=STOP
+```
+
+Bei fehlender Startfreigabe:
+
+```text
+AUTOTUNE
+2+ TC REQUIRED
+```
+
+Ergebnisanzeige; die Detailwerte bleiben seriell:
+
+```text
+AT SUCCESS
+DETAILS SERIAL
+```
 Profilbetrieb (`PROFILE`):
 
 ```text
@@ -283,8 +356,8 @@ T:500.0 SP:500
 B02 HOLD 12:34
 ```
 
-Autotune bleibt bewusst kompakt; die Detailwerte und das Ergebnis kommen über
-Serial:
+Autotune bleibt bewusst kompakt. Das LCD zeigt nur den Status; Zyklusdetails
+und berechnete PID-Werte kommen über Serial:
 
 ```text
 T:500.0 PC
@@ -306,7 +379,7 @@ SP:500 O: 25 DEG
 ```
 
 Auf der normalen Statusseite haben Sicherheitsfehler Vorrang vor
-Betriebsanzeigen. Die Diagnoseansichten `TC VIEW` und `HEATFLUX` bleiben
+Betriebsanzeigen. Die Diagnoseansichten `THERMOCOUPLES` und `HEATFLUX` bleiben
 für die Fehlersuche aufrufbar:
 
 ```text
@@ -341,7 +414,8 @@ Der Pico arbeitet dieses Profil anschließend vollständig autonom ab. `PROFILE,
 
 ## Serielles Protokoll
 
-USB CDC läuft mit 115200 Baud. Jeder Befehl endet mit `\n` und erhält genau eine Antwort `OK,...` oder `ERR,...`. Der RX-Puffer ist auf 192 Zeichen begrenzt; ein Überlauf liefert `ERR,RX_OVERFLOW`. Asynchrone Zustandsmeldungen beginnen mit `EVENT,...`, zyklische Messdaten mit `STAT,...`.
+USB CDC läuft mit 115200 Baud. Jeder Befehl endet mit `
+` und erhält genau eine Antwort `OK,...` oder `ERR,...`. Der RX-Puffer ist auf 192 Zeichen begrenzt; ein Überlauf liefert `ERR,RX_OVERFLOW`. Asynchrone Zustandsmeldungen beginnen mit `EVENT,...`, zyklische Messdaten mit `STAT,...`.
 
 Die lokale Bedienung wird nicht allein durch das Vorhandensein einer USB-Verbindung gesperrt. Der PC muss zuerst `UI,CONNECT` senden; dann meldet die Firmware `OK,UI=CONNECTED`, zeigt auf der normalen LCD-Seite neben der gemittelten Temperatur `PC` an und ignoriert alle Encoder-Aktionen einschließlich der LCD-Seitenumschaltung. Im lokalen Zustand steht dort `LOC`. Mit `UI,DISCONNECT` und `OK,UI=LOCAL` wird die lokale Bedienung wieder freigegeben. Der UI-Besitz wird nicht über einen Power-Cycle gespeichert.
 
@@ -366,7 +440,7 @@ UI,CONNECT
 UI,DISCONNECT
 
 MODE,OFF
-MODE,PID
+MODE,SETPOINT
 MODE,MANUAL
 
 AUTOTUNE,START,TARGET=500.0
@@ -393,8 +467,8 @@ Beispieldialog:
 ```text
 > SET,SP=500.0
 < OK,SP=500.0
-> MODE,PID
-< OK,MODE=PID
+> MODE,SETPOINT
+< OK,MODE=SETPOINT
 > GET,PID
 < OK,KP=2.000000,KI=0.100000,KD=5.000000
 > SET,HF_SENS=0.250000
@@ -406,7 +480,7 @@ Beispieldialog:
 Beispieltelemetrie:
 
 ```text
-STAT,SEQ=18452,T1=499.2,T1S=OK,T2=500.1,T2S=OK,T3=499.8,T3S=OK,CTRL=499.7,SP=500.0,OUT=37.4,MODE=PID,STATUS=OK,ERRORS=0x0,PID=ON
+STAT,SEQ=18452,T1=499.2,T1S=OK,T2=500.1,T2S=OK,T3=499.8,T3S=OK,CTRL=499.7,SP=500.0,OUT=37.4,MODE=SETPOINT,STATUS=OK,ERRORS=0x0,PID=ON
 ```
 
 Bei einem aktiven Profil kommen `PROFILE`, `PSTEP`, `PTYPE`, `PELAPSED` und `PREMAIN` hinzu. Ein gültiger ADS1220-Sample ergänzt immer `HFV` als differentielle Spannung in Volt. `HF` in kW/m² wird erst bei hinterlegter Kalibrierung ausgegeben.
@@ -421,13 +495,13 @@ Die Telemetrie überträgt mehrere gleichzeitige Diagnosen als Hex-Bitmaske in `
 
 Der ADS1220-Rohcode wird als vorzeichenbehafteter 24-Bit-Zweierkomplementwert gelesen. Die Umrechnung lautet `U_diff[V] = raw * VREF / (gain * 2^23)`. Bei der Standardreferenz 2,048 V und Gain 32 ist der Vollbereich näherungsweise ±64 mV. `rawValue()` und `HFV` sind diese Rohspannung in V; damit ist die Sondeninbetriebnahme ohne Kalibrierwert möglich.
 
-Für Wärmestromwerte gilt weiterhin `engineering_value = raw_value * calibration_factor + calibration_offset` in kW/m². `HEAT_FLUX_CALIBRATION_FACTOR` ist bewusst `NAN`, ebenso der Platzhalter `SCHMIDT_BOELTER_SENSITIVITY_MV_PER_KW_M2`: Der echte MEDTHERM-Kalibrierwert darf erst nach Ablesen des Kalibrierzertifikats eingetragen werden. Solange der Faktor nicht endlich und positiv ist, liefert `engineeringValue()` kein Ergebnis und die Telemetrie enthält kein `HF`-Feld. Der Wärmestromwert dient ausschließlich Anzeige, serieller Ausgabe und Kalibrierung des Heizsystems; er ist kein Eingang des PID-Regelkreises.
+Für Wärmestromwerte gilt weiterhin `engineering_value = raw_value * calibration_factor + calibration_offset` in kW/m². `HEAT_FLUX_CALIBRATION_FACTOR` ist bewusst `NAN`, ebenso der Platzhalter `SCHMIDT_BOELTER_SENSITIVITY_MV_PER_KW_M2`: Der echte MEDTHERM-Kalibrierwert darf erst nach Ablesen des Kalibrierzertifikats eingetragen werden. Solange der Faktor nicht endlich und positiv ist, liefert `engineeringValue()` kein Ergebnis und die Telemetrie enthält kein `HF`-Feld. Der Wärmestromwert ist ein zusätzlicher Kennwert des Heizsystems. Die Regelung verwendet immer die Temperatur der Thermoelemente; Heatflux wird weder als PID-Eingang noch für eine automatische Leistungsregelung verwendet. Nach Festlegung der Heatflux-Messparameter wird der Wärmestrom ausschließlich manuell der jeweiligen Temperatur zugeordnet und zur Heizsystem-Kalibrierung dokumentiert. Der Heizer wird weiterhin ausschließlich temperaturgeführt betrieben.
 
 Der Kalibrierwert kann nach dem Booten seriell gesetzt werden. `SET,HF_SENS=...` erwartet die Empfindlichkeit vom Zertifikat in mV/(kW/m²) und speichert den daraus berechneten Faktor persistent. Mit `SET,HF_FACTOR=...` kann der Faktor direkt in kW/m²/V gesetzt werden; `SET,HF_OFFSET=...` setzt den Offset. Änderungen werden – wie PID-Werte – nach fünf Sekunden ohne weitere Änderung im EEPROM gespeichert. `GET,HEATFLUX` liest den aktuell geladenen Wert zurück. Ein Neustart übernimmt den gespeicherten Wert automatisch.
 
 ## Persistente Einstellungen
 
-Kp, Ki, Kd und der letzte normale Sollwert werden über die EEPROM-Emulation des Arduino-Pico-Core gespeichert. Eine Prüfsumme schützt gegen ungültige Daten. Flash wird nicht bei jeder Encoder-Rastung beschrieben, sondern erst fünf Sekunden nach der letzten Änderung. Sollwerte aus Profil oder Autotune überschreiben den gespeicherten normalen Sollwert nicht.
+Kp, Ki, Kd und der letzte normale Sollwert werden über die EEPROM-Emulation des Arduino-Pico-Core gespeichert. Eine Prüfsumme schützt gegen ungültige Daten. Eine nicht gesetzte Wärmestromkalibrierung (`NAN`) macht die übrigen gespeicherten Einstellungen nicht ungültig. Flash wird nicht bei jeder Encoder-Rastung beschrieben, sondern erst fünf Sekunden nach der letzten Änderung. Sollwerte aus Profil oder Autotune überschreiben den gespeicherten normalen Sollwert nicht.
 
 ## Build, Upload und Testgrenzen
 
